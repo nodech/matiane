@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Domain in Title [Matiane]",
+  "author": "Nodari Chkuaselidze",
+  "version": "0.2",
+  "description": "Appends [domain] to the window title.",
+  "permissions": [],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "matiane-add-title@nodech.dev",
+      "data_collection_permissions": {
+        "required": [
+          "websiteContent"
+        ]
+      }
+    }
+  }
+}
