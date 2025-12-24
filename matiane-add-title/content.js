@@ -10,28 +10,50 @@
     }
   };
 
-  formatTitle();
+  let titleObserver = null;
+  const watchTitleElement = (titleNode) => {
+    if (titleObserver) titleObserver.disconnect();
 
-  const attachObserver = () => {
-    const target = document.querySelector('title') || document.head;
-
-    if (target) {
-      new MutationObserver(formatTitle).observe(target, {
-        subtree: true,
+    if (titleNode) {
+      titleObserver = new MutationObserver(formatTitle);
+      titleObserver.observe(titleNode, {
+        childList: true,
         characterData: true,
-        childList: true
+        subtree: true
       });
 
-      return true;
+      formatTitle();
     }
-
-    return false;
   };
 
-  if (!attachObserver()) {
-    window.addEventListener('DOMContentLoaded', () => {
-      formatTitle();
-      attachObserver();
+  const attachHeadObserver = () => {
+    const head = document.querySelector('head');
+
+    if (!head) {
+      return false;
+    }
+
+    watchTitleElement(document.querySelector('title'));
+    formatTitle();
+
+    new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node.tagName === 'TITLE') {
+            watchTitleElement(node);
+            return; 
+          }
+        }
+      }
+    }).observe(head, {
+      childList: true, 
+      subtree: false
     });
+
+    return true;
+  };
+
+  if (!attachHeadObserver()) {
+    window.addEventListener('DOMContentLoaded', attachHeadObserver);
   }
 })();

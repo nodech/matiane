@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Domain in Title [Matiane]",
   "author": "Nodari Chkuaselidze",
-  "version": "0.2",
+  "version": "0.3",
   "description": "Appends [domain] to the window title.",
   "permissions": [],
   "content_scripts": [
