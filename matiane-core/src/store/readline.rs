@@ -1,4 +1,6 @@
 use crate::util::{memchr, memrchr};
+use futures::stream::{self, Stream};
+use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use thiserror::Error;
@@ -7,9 +9,14 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 
 // 512 KiB.
 const DEFAULT_BUF_SIZE: NonZeroUsize = NonZeroUsize::new(512 * 1024).unwrap();
+
 // 64 KiB.
 const DEFAULT_REV_BUF_SIZE: NonZeroUsize =
     NonZeroUsize::new(64 * 1024).unwrap();
+
+// 4 KiB.
+const DEFAULT_SEEK_BUF_SIZE: NonZeroUsize =
+    NonZeroUsize::new(4 * 1024).unwrap();
 
 #[derive(Debug, Error)]
 pub enum LineReaderError {
@@ -17,6 +24,14 @@ pub enum LineReaderError {
     Io(#[from] std::io::Error),
     #[error("String UTF Error: {0}")]
     Utf8(#[from] std::string::FromUtf8Error),
+    #[error("Compare Error: {0}")]
+    Compare(#[from] Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl LineReaderError {
+    pub fn compare<E: std::error::Error + Send + Sync + 'static>(e: E) -> Self {
+        Self::Compare(Box::new(e))
+    }
 }
 
 pub type ReaderResult<T> = Result<T, LineReaderError>;
@@ -25,23 +40,45 @@ pub trait LineReader {
     fn next_line(
         &mut self,
     ) -> impl Future<Output = ReaderResult<Option<String>>>;
+
     fn rewind(&mut self) -> impl Future<Output = ReaderResult<u64>>;
+
+    fn seek(
+        &mut self,
+        pos: SeekFrom,
+    ) -> impl Future<Output = ReaderResult<u64>>;
+
+    fn into_stream(self) -> impl Stream<Item = ReaderResult<String>>
+    where
+        Self: Sized,
+    {
+        stream::unfold(self, |mut reader| async {
+            match reader.next_line().await {
+                Ok(Some(line)) => Some((Ok(line), reader)),
+                Ok(None) => None,
+                Err(e) => Some((Err(e), reader)),
+            }
+        })
+    }
 }
 
 /// Reader reads buffer then processes, may not read full buffer.
-pub struct FileLineReader {
-    file: File,
+pub struct FileLineReader<'a> {
+    file: &'a mut File,
     buffer: Buffer<Forward>,
     line_buf: Vec<u8>,
     eof: bool,
 }
 
-impl FileLineReader {
-    pub fn new(file: File) -> Self {
+impl<'a> FileLineReader<'a> {
+    pub fn new(file: &'a mut File) -> Self {
         Self::with_buffer_size(file, DEFAULT_BUF_SIZE)
     }
 
-    pub fn with_buffer_size(file: File, buffer_size: NonZeroUsize) -> Self {
+    pub fn with_buffer_size(
+        file: &'a mut File,
+        buffer_size: NonZeroUsize,
+    ) -> Self {
         Self {
             file,
             buffer: Buffer::<Forward>::new(buffer_size),
@@ -70,10 +107,14 @@ impl FileLineReader {
     }
 }
 
-impl LineReader for FileLineReader {
+impl LineReader for FileLineReader<'_> {
     async fn rewind(&mut self) -> ReaderResult<u64> {
+        self.seek(SeekFrom::Start(0)).await
+    }
+
+    async fn seek(&mut self, pos: SeekFrom) -> ReaderResult<u64> {
         self.reset();
-        Ok(self.file.seek(SeekFrom::Start(0)).await?)
+        Ok(self.file.seek(pos).await?)
     }
 
     async fn next_line(&mut self) -> ReaderResult<Option<String>> {
@@ -112,20 +153,24 @@ impl LineReader for FileLineReader {
     }
 }
 
-pub struct FileLineReverseReader {
-    file: File,
+#[derive(Debug)]
+pub struct FileLineReverseReader<'a> {
+    file: &'a mut File,
     buffer: Buffer<Backward>,
     line_buf: Vec<u8>,
     done: bool,
     pos: u64,
 }
 
-impl FileLineReverseReader {
-    pub fn new(file: File) -> Self {
+impl<'a> FileLineReverseReader<'a> {
+    pub fn new(file: &'a mut File) -> Self {
         Self::with_buffer_size(file, DEFAULT_REV_BUF_SIZE)
     }
 
-    pub fn with_buffer_size(file: File, buffer_size: NonZeroUsize) -> Self {
+    pub fn with_buffer_size(
+        file: &'a mut File,
+        buffer_size: NonZeroUsize,
+    ) -> Self {
         Self {
             file,
             buffer: Buffer::<Backward>::new(buffer_size),
@@ -167,10 +212,14 @@ impl FileLineReverseReader {
     }
 }
 
-impl LineReader for FileLineReverseReader {
+impl LineReader for FileLineReverseReader<'_> {
     async fn rewind(&mut self) -> ReaderResult<u64> {
+        self.seek(SeekFrom::End(0)).await
+    }
+
+    async fn seek(&mut self, pos: SeekFrom) -> ReaderResult<u64> {
         self.reset();
-        self.pos = self.file.seek(SeekFrom::End(0)).await?;
+        self.pos = self.file.seek(pos).await?;
 
         Ok(self.pos)
     }
@@ -212,6 +261,113 @@ fn concat_slices(pre: &[u8], post: &[u8]) -> Vec<u8> {
     concatted.extend_from_slice(pre);
     concatted.extend_from_slice(post);
     concatted
+}
+
+/// Binary search line in the file with custom comparator.
+pub struct BinarySearch<'a, F>
+where
+    F: Fn(&str) -> ReaderResult<Ordering>,
+{
+    file: &'a mut File,
+    cmp: F,
+    buffer_size: NonZeroUsize,
+}
+
+impl<'a, F> BinarySearch<'a, F>
+where
+    F: Fn(&str) -> ReaderResult<Ordering>,
+{
+    pub fn new(file: &'a mut File, cmp: F) -> Self {
+        Self {
+            file,
+            cmp,
+            buffer_size: DEFAULT_SEEK_BUF_SIZE,
+        }
+    }
+
+    pub fn buffer_size(mut self, size: NonZeroUsize) -> Self {
+        self.buffer_size = size;
+        self
+    }
+
+    pub async fn seek(mut self) -> ReaderResult<Option<u64>> {
+        let fmeta = self.file.metadata().await?;
+
+        let mut count = 0;
+        let file_len = fmeta.len();
+        let mut left: u64 = 0;
+        let mut right: u64 = fmeta.len();
+
+        loop {
+            count += 1;
+
+            if count == 10 {
+                panic!("Let me eat those oats brother.");
+            }
+
+            let mut mid = (right + left) / 2;
+
+            if left >= right {
+                return Ok(Some(mid + 1));
+            }
+
+            let mut backwards = FileLineReverseReader::with_buffer_size(
+                &mut self.file,
+                self.buffer_size,
+            );
+
+            backwards.seek(SeekFrom::Start(mid)).await?;
+
+            let backline = backwards.next_line().await?;
+
+            if backline.is_none() {
+                return Ok(None);
+            }
+
+            // This line is partial, but we only use this
+            // to find the beginning of the line.
+            let line_len = backline.unwrap().len() as u64;
+
+            // This is new mid, where actual line starts.
+            mid = mid.saturating_sub(line_len);
+
+            let mut forwards = FileLineReader::with_buffer_size(
+                &mut self.file,
+                self.buffer_size,
+            );
+
+            forwards.seek(SeekFrom::Start(mid)).await?;
+
+            let full_line = forwards.next_line().await?;
+
+            if full_line.is_none() {
+                return Ok(None);
+            }
+
+            let full_line = full_line.unwrap();
+            let cmp_res = (self.cmp)(&full_line)?;
+
+            match cmp_res {
+                Ordering::Less => {
+                    left = mid + (full_line.len() as u64) + 1;
+
+                    if left > file_len {
+                        return Ok(None);
+                    }
+                }
+                Ordering::Equal => {
+                    return Ok(Some(mid));
+                }
+                Ordering::Greater => {
+                    if mid == 0 {
+                        return Ok(None);
+                    }
+
+                    right = mid - 1;
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
