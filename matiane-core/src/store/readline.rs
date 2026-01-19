@@ -293,79 +293,74 @@ where
     pub async fn seek(mut self) -> ReaderResult<Option<u64>> {
         let fmeta = self.file.metadata().await?;
 
-        let mut count = 0;
         let file_len = fmeta.len();
+
+        if file_len == 0 {
+            return Ok(None);
+        }
+
         let mut left: u64 = 0;
         let mut right: u64 = fmeta.len();
 
         loop {
-            count += 1;
-
-            if count == 10 {
-                panic!("Let me eat those oats brother.");
-            }
-
-            let mut mid = (right + left) / 2;
+            let mid = (right + left) / 2;
 
             if left >= right {
                 return Ok(Some(mid + 1));
             }
 
-            let mut backwards = FileLineReverseReader::with_buffer_size(
-                &mut self.file,
-                self.buffer_size,
-            );
-
-            backwards.seek(SeekFrom::Start(mid)).await?;
-
-            let backline = backwards.next_line().await?;
-
-            if backline.is_none() {
+            let Some(line_start) = self.line_start(mid).await? else {
                 return Ok(None);
-            }
+            };
 
-            // This line is partial, but we only use this
-            // to find the beginning of the line.
-            let line_len = backline.unwrap().len() as u64;
+            let line = {
+                let mut forwards = FileLineReader::with_buffer_size(
+                    &mut self.file,
+                    self.buffer_size,
+                );
 
-            // This is new mid, where actual line starts.
-            mid = mid.saturating_sub(line_len);
+                forwards.seek(SeekFrom::Start(line_start)).await?;
+                forwards.next_line().await?
+            };
 
-            let mut forwards = FileLineReader::with_buffer_size(
-                &mut self.file,
-                self.buffer_size,
-            );
-
-            forwards.seek(SeekFrom::Start(mid)).await?;
-
-            let full_line = forwards.next_line().await?;
-
-            if full_line.is_none() {
+            let Some(line) = line else {
                 return Ok(None);
-            }
+            };
 
-            let full_line = full_line.unwrap();
-            let cmp_res = (self.cmp)(&full_line)?;
-
-            match cmp_res {
+            match (self.cmp)(&line)? {
                 Ordering::Less => {
-                    left = mid + (full_line.len() as u64) + 1;
+                    left = line_start + (line.len() as u64) + 1;
 
                     if left > file_len {
                         return Ok(None);
                     }
                 }
                 Ordering::Equal => {
-                    return Ok(Some(mid));
+                    return Ok(Some(line_start));
                 }
                 Ordering::Greater => {
-                    if mid == 0 {
+                    if line_start == 0 {
                         return Ok(None);
                     }
 
-                    right = mid - 1;
+                    right = line_start - 1;
                 }
             }
+        }
+    }
+
+    async fn line_start(&mut self, pos: u64) -> ReaderResult<Option<u64>> {
+        let mut backwards = FileLineReverseReader::with_buffer_size(
+            &mut self.file,
+            self.buffer_size,
+        );
+
+        backwards.seek(SeekFrom::Start(pos)).await?;
+
+        if let Some(partial) = backwards.next_line().await? {
+            Ok(Some(pos.saturating_sub(partial.len() as u64)))
+        } else {
+            Ok(None)
         }
     }
 }
