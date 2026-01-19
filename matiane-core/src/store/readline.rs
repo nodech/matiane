@@ -1,7 +1,6 @@
 use crate::util::{memchr, memrchr};
 use futures::stream::{self, Stream};
 use std::cmp::Ordering;
-use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use thiserror::Error;
 use tokio::fs::File;
@@ -65,7 +64,7 @@ pub trait LineReader {
 /// Reader reads buffer then processes, may not read full buffer.
 pub struct FileLineReader<'a> {
     file: &'a mut File,
-    buffer: Buffer<Forward>,
+    buffer: Buffer,
     line_buf: Vec<u8>,
     eof: bool,
 }
@@ -81,7 +80,7 @@ impl<'a> FileLineReader<'a> {
     ) -> Self {
         Self {
             file,
-            buffer: Buffer::<Forward>::new(buffer_size),
+            buffer: Buffer::new(buffer_size),
             line_buf: Vec::new(),
             eof: false,
         }
@@ -123,7 +122,7 @@ impl LineReader for FileLineReader<'_> {
                 self.read_to_buffer().await?;
             }
 
-            let unprocessed = self.buffer.unprocessed();
+            let unprocessed = self.buffer.unprocessed_forward();
 
             if let Some(n) = memchr(b'\n', unprocessed) {
                 self.line_buf.extend_from_slice(&unprocessed[0..n]);
@@ -156,7 +155,7 @@ impl LineReader for FileLineReader<'_> {
 #[derive(Debug)]
 pub struct FileLineReverseReader<'a> {
     file: &'a mut File,
-    buffer: Buffer<Backward>,
+    buffer: Buffer,
     line_buf: Vec<u8>,
     done: bool,
     pos: u64,
@@ -173,7 +172,7 @@ impl<'a> FileLineReverseReader<'a> {
     ) -> Self {
         Self {
             file,
-            buffer: Buffer::<Backward>::new(buffer_size),
+            buffer: Buffer::new(buffer_size),
             line_buf: Vec::new(),
             done: false,
             pos: 0,
@@ -226,7 +225,7 @@ impl LineReader for FileLineReverseReader<'_> {
 
     async fn next_line(&mut self) -> ReaderResult<Option<String>> {
         loop {
-            let process = self.buffer.unprocessed();
+            let process = self.buffer.unprocessed_backward();
 
             if self.done && process.is_empty() {
                 if !self.line_buf.is_empty() {
@@ -366,21 +365,23 @@ where
 }
 
 #[derive(Debug)]
-struct Forward;
-
-#[derive(Debug)]
-struct Backward;
-
-#[derive(Debug)]
-struct Buffer<D> {
+struct Buffer {
     processed: usize,
     filled: usize,
     size: usize,
     data: Vec<u8>,
-    _dir: PhantomData<D>,
 }
 
-impl<D> Buffer<D> {
+impl Buffer {
+    fn new(size: NonZeroUsize) -> Self {
+        Self {
+            filled: 0,
+            processed: 0,
+            size: size.get(),
+            data: vec![0; size.get()],
+        }
+    }
+
     fn capacity(&self) -> usize {
         self.size
     }
@@ -401,40 +402,16 @@ impl<D> Buffer<D> {
         self.filled - self.processed
     }
 
+    fn unprocessed_forward(&self) -> &[u8] {
+        &self.data[self.processed..self.filled]
+    }
+
+    fn unprocessed_backward(&self) -> &[u8] {
+        &self.data[0..(self.filled - self.processed)]
+    }
+
     fn reset(&mut self) {
         self.filled = 0;
         self.processed = 0;
-    }
-}
-
-impl Buffer<Forward> {
-    fn new(size: NonZeroUsize) -> Self {
-        Self {
-            filled: 0,
-            processed: 0,
-            size: size.get(),
-            data: vec![0; size.get()],
-            _dir: PhantomData,
-        }
-    }
-
-    fn unprocessed(&self) -> &[u8] {
-        &self.data[self.processed..self.filled]
-    }
-}
-
-impl Buffer<Backward> {
-    fn new(size: NonZeroUsize) -> Self {
-        Self {
-            filled: 0,
-            processed: 0,
-            size: size.get(),
-            data: vec![0; size.get()],
-            _dir: PhantomData,
-        }
-    }
-
-    fn unprocessed(&self) -> &[u8] {
-        &self.data[0..(self.filled - self.processed)]
     }
 }
