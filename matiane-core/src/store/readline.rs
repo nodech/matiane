@@ -64,7 +64,7 @@ pub trait LineReader {
 /// Reader reads buffer then processes, may not read full buffer.
 pub struct FileLineReader<'a> {
     file: &'a mut File,
-    buffer: Buffer,
+    buffer: BufferRef<'a>,
     line_buf: Vec<u8>,
     eof: bool,
 }
@@ -80,7 +80,16 @@ impl<'a> FileLineReader<'a> {
     ) -> Self {
         Self {
             file,
-            buffer: Buffer::new(buffer_size),
+            buffer: BufferRef::Owned(Buffer::new(buffer_size)),
+            line_buf: Vec::new(),
+            eof: false,
+        }
+    }
+
+    pub fn with_buffer(file: &'a mut File, buffer: &'a mut Buffer) -> Self {
+        Self {
+            file,
+            buffer: BufferRef::Borrowed(buffer),
             line_buf: Vec::new(),
             eof: false,
         }
@@ -155,7 +164,7 @@ impl LineReader for FileLineReader<'_> {
 #[derive(Debug)]
 pub struct FileLineReverseReader<'a> {
     file: &'a mut File,
-    buffer: Buffer,
+    buffer: BufferRef<'a>,
     line_buf: Vec<u8>,
     done: bool,
     pos: u64,
@@ -172,7 +181,17 @@ impl<'a> FileLineReverseReader<'a> {
     ) -> Self {
         Self {
             file,
-            buffer: Buffer::new(buffer_size),
+            buffer: BufferRef::Owned(Buffer::new(buffer_size)),
+            line_buf: Vec::new(),
+            done: false,
+            pos: 0,
+        }
+    }
+
+    pub fn with_buffer(file: &'a mut File, buffer: &'a mut Buffer) -> Self {
+        Self {
+            file,
+            buffer: BufferRef::Borrowed(buffer),
             line_buf: Vec::new(),
             done: false,
             pos: 0,
@@ -243,7 +262,10 @@ impl LineReader for FileLineReverseReader<'_> {
                     prefix,
                     &std::mem::take(&mut self.line_buf),
                 ))?;
-                self.buffer.advance_processed(prefix.len() + 1);
+
+                let prefix_len = prefix.len();
+
+                self.buffer.advance_processed(prefix_len + 1);
 
                 return Ok(Some(line));
             } else {
@@ -270,6 +292,7 @@ where
     file: &'a mut File,
     cmp: F,
     buffer_size: NonZeroUsize,
+    buffer: Buffer,
 }
 
 impl<'a, F> BinarySearch<'a, F>
@@ -281,11 +304,13 @@ where
             file,
             cmp,
             buffer_size: DEFAULT_SEEK_BUF_SIZE,
+            buffer: Buffer::new(DEFAULT_SEEK_BUF_SIZE),
         }
     }
 
     pub fn buffer_size(mut self, size: NonZeroUsize) -> Self {
         self.buffer_size = size;
+        self.buffer = Buffer::new(size);
         self
     }
 
@@ -313,9 +338,10 @@ where
             };
 
             let line = {
-                let mut forwards = FileLineReader::with_buffer_size(
+                self.buffer.reset();
+                let mut forwards = FileLineReader::with_buffer(
                     &mut self.file,
-                    self.buffer_size,
+                    &mut self.buffer,
                 );
 
                 forwards.seek(SeekFrom::Start(line_start)).await?;
@@ -349,9 +375,11 @@ where
     }
 
     async fn line_start(&mut self, pos: u64) -> ReaderResult<Option<u64>> {
-        let mut backwards = FileLineReverseReader::with_buffer_size(
+        self.buffer.reset();
+
+        let mut backwards = FileLineReverseReader::with_buffer(
             &mut self.file,
-            self.buffer_size,
+            &mut self.buffer,
         );
 
         backwards.seek(SeekFrom::Start(pos)).await?;
@@ -365,7 +393,7 @@ where
 }
 
 #[derive(Debug)]
-struct Buffer {
+pub struct Buffer {
     processed: usize,
     filled: usize,
     size: usize,
@@ -413,5 +441,31 @@ impl Buffer {
     fn reset(&mut self) {
         self.filled = 0;
         self.processed = 0;
+    }
+}
+
+#[derive(Debug)]
+pub enum BufferRef<'a> {
+    Owned(Buffer),
+    Borrowed(&'a mut Buffer),
+}
+
+impl std::ops::DerefMut for BufferRef<'_> {
+    fn deref_mut(&mut self) -> &mut Buffer {
+        match self {
+            BufferRef::Owned(b) => b,
+            BufferRef::Borrowed(b) => b,
+        }
+    }
+}
+
+impl std::ops::Deref for BufferRef<'_> {
+    type Target = Buffer;
+
+    fn deref(&self) -> &Buffer {
+        match self {
+            BufferRef::Owned(b) => b,
+            BufferRef::Borrowed(b) => b,
+        }
     }
 }
