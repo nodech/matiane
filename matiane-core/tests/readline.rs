@@ -219,6 +219,7 @@ async fn readline_rewind_backward() -> Result<()> {
 
 #[tokio::test]
 async fn readline_bin_seek() -> Result<()> {
+    use readline::{BinarySearch, LineReaderError, ReaderResult};
     use std::cmp::Ordering;
 
     // Per line: 5 literal + 2 digits + 1 new line = 8
@@ -231,7 +232,7 @@ async fn readline_bin_seek() -> Result<()> {
     let buf_size = NonZeroUsize::new(128).unwrap();
 
     // If all of them are less, return None.
-    let pos = readline::BinarySearch::new(&mut file, |_| Ok(Ordering::Less))
+    let pos = BinarySearch::new(&mut file, |_| Ok(Ordering::Less))
         .buffer_size(buf_size)
         .seek()
         .await?;
@@ -239,24 +240,22 @@ async fn readline_bin_seek() -> Result<()> {
     assert_eq!(pos, None);
 
     // If all of them are more, return None.
-    let pos = readline::BinarySearch::new(&mut file, |_| Ok(Ordering::Greater))
+    let pos = BinarySearch::new(&mut file, |_| Ok(Ordering::Greater))
         .buffer_size(buf_size)
         .seek()
         .await?;
 
     assert_eq!(pos, None);
 
-    fn line_to_number(l: &str) -> readline::ReaderResult<u32> {
+    fn line_to_number(l: &str) -> ReaderResult<u32> {
         let matches: String = l.matches(char::is_numeric).collect();
-        let num = matches
-            .parse::<u32>()
-            .map_err(readline::LineReaderError::compare)?;
+        let num = matches.parse::<u32>().map_err(LineReaderError::compare)?;
 
         Ok(num)
     }
 
     // offset of line 80: (80 - 10) * 8 = 560
-    let pos = readline::BinarySearch::new(&mut file, |s| {
+    let pos = BinarySearch::new(&mut file, |s| {
         if line_to_number(s)? < 80 {
             Ok(Ordering::Less)
         } else {
@@ -270,7 +269,7 @@ async fn readline_bin_seek() -> Result<()> {
     assert_eq!(pos, Some(560));
 
     // first line
-    let pos = readline::BinarySearch::new(&mut file, |s| {
+    let pos = BinarySearch::new(&mut file, |s| {
         let num = line_to_number(s)?;
 
         if num == 10 {
@@ -288,7 +287,7 @@ async fn readline_bin_seek() -> Result<()> {
     assert_eq!(pos, Some(0));
 
     // Second line but with less than 11.
-    let pos = readline::BinarySearch::new(&mut file, |s| {
+    let pos = BinarySearch::new(&mut file, |s| {
         if line_to_number(s)? < 11 {
             Ok(Ordering::Less)
         } else {
