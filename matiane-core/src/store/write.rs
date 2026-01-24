@@ -18,9 +18,8 @@ pub enum StoreWriteError {
 }
 
 pub struct EventWriter {
-    dir: PathBuf,
     file: File,
-    current_date: NaiveDate,
+    file_path: Filepath,
 }
 
 impl EventWriter {
@@ -39,12 +38,11 @@ impl EventWriter {
 
         log::debug!("opening log file: {:?}", filepath);
 
-        let file = open_write_file(filepath.into()).await?;
+        let file = open_write_file(filepath.clone().into()).await?;
 
         let store = EventWriter {
-            dir,
             file,
-            current_date: date.date_naive(),
+            file_path: filepath,
         };
 
         Ok(store)
@@ -72,20 +70,18 @@ impl EventWriter {
         &mut self,
         date: NaiveDate,
     ) -> Result<(), StoreWriteError> {
-        if self.current_date == date {
+        if self.file_path.date() == &date {
             return Ok(());
         }
 
-        let mut filepath = Into::<Filepath>::into(date);
-        filepath.set_path(self.dir.clone());
+        self.file_path.set_date(date);
 
-        log::debug!("Rotating file: {:?}", filepath);
-        let file = open_write_file(filepath.into()).await?;
+        log::debug!("Rotating file: {:?}", self.file_path);
+        let file = open_write_file(self.file_path.clone().into()).await?;
 
         self.flush().await?;
 
         self.file = file;
-        self.current_date = date;
 
         Ok(())
     }

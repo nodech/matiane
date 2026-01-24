@@ -42,6 +42,15 @@ pub(crate) struct Filepath {
 }
 
 impl Filepath {
+    pub fn date(&self) -> &NaiveDate {
+        &self.date
+    }
+
+    pub fn set_date(&mut self, date: NaiveDate) -> &mut Self {
+        self.date = date;
+        self
+    }
+
     pub fn set_path(&mut self, path: PathBuf) -> &mut Self {
         self.path = path;
         self
