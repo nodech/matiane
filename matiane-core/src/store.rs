@@ -1,6 +1,7 @@
+mod filepath;
 mod lock;
-mod write;
 // mod read;
+mod write;
 
 pub mod readline;
 

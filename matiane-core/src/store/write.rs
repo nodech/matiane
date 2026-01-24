@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+use super::filepath::Filepath;
 use crate::events::TimedEvent;
 use chrono::{DateTime, NaiveDate, Utc};
 use log::error;
@@ -27,17 +28,18 @@ impl EventWriter {
         dir: PathBuf,
         date: DateTime<Utc>,
     ) -> Result<Self, StoreWriteError> {
-        let filename = get_filename_by_date(date.date_naive());
-        let filepath = dir.join(filename);
-
         let dir_exists = tokio::fs::try_exists(&dir).await?;
 
         if !dir_exists {
             tokio::fs::create_dir(&dir).await?;
         }
 
+        let mut filepath: Filepath = date.into();
+        filepath.set_path(dir.clone());
+
         log::debug!("opening log file: {:?}", filepath);
-        let file = open_write_file(filepath).await?;
+
+        let file = open_write_file(filepath.into()).await?;
 
         let store = EventWriter {
             dir,
@@ -63,7 +65,7 @@ impl EventWriter {
     }
 
     pub async fn flush(&mut self) -> Result<(), StoreWriteError> {
-        self.file.flush().await.map_err(StoreWriteError::Io)
+        Ok(self.file.flush().await?)
     }
 
     pub async fn maybe_rotate(
@@ -74,10 +76,11 @@ impl EventWriter {
             return Ok(());
         }
 
-        let filename = get_filename_by_date(date);
-        let filepath = self.dir.join(filename);
+        let mut filepath = Into::<Filepath>::into(date);
+        filepath.set_path(self.dir.clone());
+
         log::debug!("Rotating file: {:?}", filepath);
-        let file = open_write_file(filepath).await?;
+        let file = open_write_file(filepath.into()).await?;
 
         self.flush().await?;
 
@@ -95,53 +98,4 @@ async fn open_write_file(filepath: PathBuf) -> Result<File, StoreWriteError> {
         .open(filepath)
         .await
         .map_err(StoreWriteError::Io)
-}
-
-fn get_filename_by_date(date: NaiveDate) -> PathBuf {
-    PathBuf::from(date.format("%Y%m%d").to_string()).with_extension("log")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use anyhow::Result;
-    use chrono::TimeZone;
-
-    #[test]
-    fn get_filename_by_name_test() -> Result<()> {
-        struct TestCase {
-            date: DateTime<Utc>,
-            expected: PathBuf,
-        }
-
-        let dates = [
-            TestCase {
-                date: Utc.with_ymd_and_hms(1970, 1, 1, 0, 0, 0).unwrap(),
-                expected: "19700101.log".into(),
-            },
-            TestCase {
-                date: Utc.with_ymd_and_hms(1970, 1, 1, 23, 59, 59).unwrap(),
-                expected: "19700101.log".into(),
-            },
-            TestCase {
-                date: Utc.with_ymd_and_hms(2000, 1, 1, 0, 0, 0).unwrap(),
-                expected: "20000101.log".into(),
-            },
-            TestCase {
-                date: Utc.with_ymd_and_hms(2000, 1, 1, 5, 6, 7).unwrap(),
-                expected: "20000101.log".into(),
-            },
-            TestCase {
-                date: Utc.with_ymd_and_hms(2025, 12, 31, 23, 59, 59).unwrap(),
-                expected: "20251231.log".into(),
-            },
-        ];
-
-        for test in dates {
-            let name = get_filename_by_date(test.date.date_naive());
-            assert_eq!(name, test.expected);
-        }
-
-        Ok(())
-    }
 }
