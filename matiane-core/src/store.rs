@@ -1,6 +1,6 @@
 mod filepath;
 mod lock;
-// mod read;
+mod read;
 mod write;
 
 pub mod readline;
@@ -13,6 +13,4 @@ pub use lock::LockFile;
 pub use lock::LockFileError;
 pub use lock::acquire_lock_file;
 
-// pub use read::ReadDirection;
-// pub use read::FileReader;
-// pub use read::FileReaderOptions;
+pub use read::EventReader;
