@@ -1,6 +1,6 @@
 use anyhow::Result;
 use matiane_core::store::readline::{
-    self, FileLineReader, FileLineReverseReader, LineReader,
+    self, AsyncLineReader, AsyncLineReverseReader, LineReader,
 };
 use std::num::NonZeroUsize;
 use tempfile::{Builder, TempDir};
@@ -31,7 +31,7 @@ async fn get_lines(lines: &[&str], buffer_size: usize) -> Result<Vec<String>> {
     let content = lines.join("\n");
     let (_dir, mut file) = setup_file(&content).await?;
 
-    let mut reader = FileLineReader::with_buffer_size(
+    let mut reader = AsyncLineReader::with_buffer_size(
         &mut file,
         NonZeroUsize::new(buffer_size).unwrap(),
     );
@@ -53,7 +53,7 @@ async fn get_lines_backward(
     let content = lines.join("\n");
     let (_dir, mut file) = setup_file(&content).await?;
 
-    let mut reader = FileLineReverseReader::with_buffer_size(
+    let mut reader = AsyncLineReverseReader::with_buffer_size(
         &mut file,
         NonZeroUsize::new(buffer_size).unwrap(),
     );
@@ -177,7 +177,7 @@ async fn readline_rewind_forward() -> Result<()> {
     let content = lines.join("\n");
     let (_dir, mut file) = setup_file(&content).await?;
 
-    let mut reader = FileLineReader::with_buffer_size(
+    let mut reader = AsyncLineReader::with_buffer_size(
         &mut file,
         NonZeroUsize::new(100).unwrap(),
     );
@@ -199,7 +199,7 @@ async fn readline_rewind_backward() -> Result<()> {
     let content = lines.join("\n");
     let (_dir, mut file) = setup_file(&content).await?;
 
-    let mut reader = FileLineReverseReader::with_buffer_size(
+    let mut reader = AsyncLineReverseReader::with_buffer_size(
         &mut file,
         NonZeroUsize::new(100).unwrap(),
     );

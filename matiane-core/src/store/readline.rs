@@ -62,7 +62,7 @@ pub trait LineReader {
 }
 
 /// Reader reads buffer then processes, may not read full buffer.
-pub struct FileLineReader<'a, F>
+pub struct AsyncLineReader<'a, F>
 where
     F: AsyncReadExt + AsyncSeekExt + Unpin,
 {
@@ -72,10 +72,10 @@ where
     eof: bool,
 }
 
-pub type FileLineReaderRef<'a> = FileLineReader<'a, &'a mut File>;
-pub type FileLineReaderOwned = FileLineReader<'static, File>;
+pub type FileLineReaderRef<'a> = AsyncLineReader<'a, &'a mut File>;
+pub type FileLineReaderOwned = AsyncLineReader<'static, File>;
 
-impl<'a, F> FileLineReader<'a, F>
+impl<'a, F> AsyncLineReader<'a, F>
 where
     F: AsyncReadExt + AsyncSeekExt + Unpin,
 {
@@ -121,7 +121,7 @@ where
     }
 }
 
-impl<F> LineReader for FileLineReader<'_, F>
+impl<F> LineReader for AsyncLineReader<'_, F>
 where
     F: AsyncReadExt + AsyncSeekExt + Unpin,
 {
@@ -171,7 +171,7 @@ where
 }
 
 #[derive(Debug)]
-pub struct FileLineReverseReader<'a, F>
+pub struct AsyncLineReverseReader<'a, F>
 where
     F: AsyncReadExt + AsyncSeekExt + Unpin,
 {
@@ -182,10 +182,11 @@ where
     pos: u64,
 }
 
-pub type FileLineReverseReaderRef<'a> = FileLineReverseReader<'a, &'a mut File>;
-pub type FileLineReverseReaderOwned = FileLineReverseReader<'static, File>;
+pub type FileLineReverseReaderRef<'a> =
+    AsyncLineReverseReader<'a, &'a mut File>;
+pub type FileLineReverseReaderOwned = AsyncLineReverseReader<'static, File>;
 
-impl<'a, F> FileLineReverseReader<'a, F>
+impl<'a, F> AsyncLineReverseReader<'a, F>
 where
     F: AsyncReadExt + AsyncSeekExt + Unpin,
 {
@@ -245,7 +246,7 @@ where
     }
 }
 
-impl<F> LineReader for FileLineReverseReader<'_, F>
+impl<F> LineReader for AsyncLineReverseReader<'_, F>
 where
     F: AsyncReadExt + AsyncSeekExt + Unpin,
 {
@@ -358,7 +359,7 @@ where
             let line = {
                 self.buffer.reset();
                 let mut forwards: FileLineReaderRef =
-                    FileLineReader::with_buffer(
+                    AsyncLineReader::with_buffer(
                         &mut self.file,
                         &mut self.buffer,
                     );
@@ -397,7 +398,7 @@ where
         self.buffer.reset();
 
         let mut backwards: FileLineReverseReaderRef =
-            FileLineReverseReader::with_buffer(
+            AsyncLineReverseReader::with_buffer(
                 &mut self.file,
                 &mut self.buffer,
             );
