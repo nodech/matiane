@@ -3,15 +3,9 @@ use chrono::{TimeZone, Utc};
 use matiane_core::events::{Event, Focused, TimedEvent};
 use matiane_core::store::EventWriter;
 use std::fs;
-use tempfile::{Builder, TempDir};
 
-fn tmpdir(name: &str) -> TempDir {
-    Builder::new()
-        .prefix(&format!("matiane-core-{}", name))
-        .rand_bytes(10)
-        .tempdir()
-        .unwrap()
-}
+mod util;
+use util::tmpdir;
 
 #[tokio::test]
 async fn store_write_touch() -> Result<()> {

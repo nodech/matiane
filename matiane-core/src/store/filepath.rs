@@ -1,7 +1,7 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use std::error::Error;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const DATE_FORMAT: &str = "%Y%m%d";
 const EXTENSION: &str = "log";
@@ -35,8 +35,8 @@ impl fmt::Display for TryIntoFilenameError {
 
 impl Error for TryIntoFilenameError {}
 
-#[derive(Debug, PartialEq, Clone)]
-pub(crate) struct Filepath {
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Filepath {
     path: PathBuf,
     date: NaiveDate,
 }
@@ -51,17 +51,28 @@ impl Filepath {
         self
     }
 
+    pub fn increment_date(&mut self) -> &mut Self {
+        self.date += chrono::TimeDelta::days(1);
+        self
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     pub fn set_path(&mut self, path: PathBuf) -> &mut Self {
         self.path = path;
         self
     }
-}
 
-impl From<Filepath> for PathBuf {
-    fn from(filename: Filepath) -> Self {
-        let formatted = filename.date.format(DATE_FORMAT);
-        filename
-            .path
+    pub fn with_path(mut self, path: PathBuf) -> Self {
+        self.path = path;
+        self
+    }
+
+    pub fn to_path_buf(&self) -> PathBuf {
+        let formatted = self.date.format(DATE_FORMAT);
+        self.path
             .join(formatted.to_string())
             .with_extension(EXTENSION)
     }
@@ -147,16 +158,16 @@ mod tests {
 
         for test in dates {
             let name: Filepath = test.date.into();
-            let path: PathBuf = name.into();
+            let path: PathBuf = name.to_path_buf();
             assert_eq!(path, test.expected, "{:?}", test);
 
             let name: Filepath = test.date.date_naive().into();
-            let path: PathBuf = name.into();
+            let path: PathBuf = name.to_path_buf();
             assert_eq!(path, test.expected, "{:?}", test);
 
             // None of the tests have prefix/path.
             let name: Filepath = test.expected.clone().try_into()?;
-            let path: PathBuf = name.into();
+            let path: PathBuf = name.to_path_buf();
             assert_eq!(path, test.expected, "{:?}", test);
         }
 
@@ -230,7 +241,7 @@ mod tests {
 
         for test in tests {
             let file_path: Filepath = test.clone().try_into()?;
-            let back_path: PathBuf = file_path.into();
+            let back_path: PathBuf = file_path.to_path_buf();
 
             assert_eq!(back_path, test, "{:?} != {:?}", back_path, test);
         }

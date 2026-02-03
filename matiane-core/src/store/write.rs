@@ -3,7 +3,6 @@ use thiserror::Error;
 use super::filepath::Filepath;
 use crate::events::TimedEvent;
 use chrono::{DateTime, NaiveDate, Utc};
-use log::error;
 use serde_json;
 use std::path::PathBuf;
 use tokio::fs::File;
@@ -33,12 +32,11 @@ impl EventWriter {
             tokio::fs::create_dir(&dir).await?;
         }
 
-        let mut filepath: Filepath = date.into();
-        filepath.set_path(dir.clone());
+        let filepath = Into::<Filepath>::into(date).with_path(dir);
 
         log::debug!("opening log file: {:?}", filepath);
 
-        let file = open_write_file(filepath.clone().into()).await?;
+        let file = open_write_file(filepath.to_path_buf()).await?;
 
         let store = EventWriter {
             file,
@@ -77,7 +75,7 @@ impl EventWriter {
         self.file_path.set_date(date);
 
         log::debug!("Rotating file: {:?}", self.file_path);
-        let file = open_write_file(self.file_path.clone().into()).await?;
+        let file = open_write_file(self.file_path.to_path_buf()).await?;
 
         self.flush().await?;
 
@@ -88,10 +86,9 @@ impl EventWriter {
 }
 
 async fn open_write_file(filepath: PathBuf) -> Result<File, StoreWriteError> {
-    tokio::fs::OpenOptions::new()
+    Ok(tokio::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(filepath)
-        .await
-        .map_err(StoreWriteError::Io)
+        .await?)
 }
