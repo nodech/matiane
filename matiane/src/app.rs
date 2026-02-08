@@ -9,7 +9,6 @@ use chrono::TimeZone;
 use iced::{Element, Fill, Subscription, Task};
 
 use crate::config;
-use crate::datefile;
 use crate::icon;
 
 const DEFAULT_LIGHT: Theme = Theme::Light;
@@ -30,7 +29,7 @@ pub enum State {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    LoadedDates(BTreeSet<datefile::DateFile>),
+    LoadedDates(()),
     ThemeToggle,
 }
 
@@ -42,7 +41,7 @@ pub struct App {
 
     config: config::MatianeConfig,
     tz_offset: chrono::FixedOffset,
-    loaded_dates: Option<BTreeSet<datefile::DateFile>>,
+    loaded_dates: Option<()>,
 }
 
 impl App {

@@ -14,7 +14,6 @@ use matiane_core::xdg::Xdg;
 
 mod app;
 mod config;
-mod datefile;
 mod icon;
 mod screen;
 
