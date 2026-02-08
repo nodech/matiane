@@ -1,20 +1,16 @@
 #![cfg(target_os = "linux")]
 use anyhow::{Context, Result};
 use chrono::Utc;
-use clap::{
-    arg,
-    builder::{PossibleValuesParser, TypedValueParser},
-    command, value_parser,
-};
 use futures::{StreamExt, future::ready};
-use log::{LevelFilter, debug, error, info, trace, warn};
+use log::{debug, error, info, trace, warn};
+use matiane_core::args;
+use matiane_core::config::load as load_config;
 use matiane_core::events::{Event, Focused, TimedEvent};
 use matiane_core::log::init_global_logger;
 use matiane_core::process::RunningHandle;
 use matiane_core::store::{EventWriter, acquire_lock_file};
 use matiane_core::xdg::Xdg;
 use std::path::PathBuf;
-use std::str::FromStr;
 use sway_matiane::{config, sway, swayidle, tray};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::time::{MissedTickBehavior, interval};
@@ -28,15 +24,22 @@ use sway::{
 async fn main() -> Result<()> {
     let xdg = Xdg::new(matiane_core::NAME.into());
 
-    let ParsedArgs {
-        config_file,
-        log_level,
-    } = parse_args(&xdg);
+    let (
+        _,
+        args::GeneralArgs {
+            config_file,
+            log_level,
+        },
+    ) = matiane_core::args::parse_args(
+        &xdg,
+        "Sway matiane logger",
+        std::iter::empty::<clap::Arg>(),
+    );
 
     init_global_logger(log_level)?;
 
     debug!("Loading config...");
-    let cfg = load_config(&config_file).await?;
+    let cfg = load_config::<config::SwayCliConfig>(&config_file)?;
     trace!("Config: {:?}", cfg);
 
     let swaysock_path: PathBuf = std::env::var("SWAYSOCK")
@@ -163,58 +166,6 @@ async fn main() -> Result<()> {
     drop(lockfile);
 
     Ok(())
-}
-
-struct ParsedArgs {
-    config_file: PathBuf,
-    log_level: LevelFilter,
-}
-
-fn parse_args(xdg: &Xdg) -> ParsedArgs {
-    let possible_levels: Vec<_> =
-        LevelFilter::iter().map(|v| v.as_str()).collect();
-
-    let matches = command!("Sway matiane logger")
-        .arg(
-            arg!(-c --config <FILE> "Sets a custom config file")
-                .value_parser(value_parser!(PathBuf)),
-        )
-        .arg(
-            arg!(-l --level <LEVEL> "Sets a log level")
-                .value_parser(
-                    PossibleValuesParser::new(possible_levels)
-                        .map(|s| LevelFilter::from_str(&s).unwrap()),
-                )
-                .ignore_case(true)
-                .default_value("INFO"),
-        )
-        .get_matches();
-
-    let log_level = *matches.get_one::<LevelFilter>("level").unwrap();
-    let config_file = matches
-        .get_one::<PathBuf>("config")
-        .cloned()
-        .unwrap_or_else(|| xdg.config_dir().join("config.toml"));
-
-    ParsedArgs {
-        config_file,
-        log_level,
-    }
-}
-
-async fn load_config(file: &PathBuf) -> Result<config::SwayCliConfig> {
-    let file_str = match tokio::fs::read_to_string(file).await {
-        Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(config::SwayCliConfig::default());
-        }
-        Err(e) => return Err(e).context("Failed to read configuration file"),
-    };
-
-    let parsed = toml::from_str::<config::SwayCliConfig>(&file_str)
-        .context("Failed to parse TOML from configuration file")?;
-
-    Ok(parsed)
 }
 
 fn timed_event(event: Event) -> TimedEvent {

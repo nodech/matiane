@@ -1,5 +1,6 @@
 pub const NAME: &str = "matiane";
 
+pub mod args;
 pub mod config;
 pub mod events;
 pub mod log;

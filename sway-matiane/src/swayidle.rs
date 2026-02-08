@@ -75,9 +75,9 @@ impl ToCommand for Timeout {
         let mut args: Vec<String> =
             vec!["timeout".into(), self.timeout.to_string(), self.timeout_cmd];
 
-        if self.resume.is_some() {
+        if let Some(command) = self.resume {
             args.push("resume".into());
-            args.push(self.resume.unwrap());
+            args.push(command);
         }
 
         args
