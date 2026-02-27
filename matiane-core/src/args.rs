@@ -10,9 +10,39 @@ use clap::{
 
 use super::xdg::Xdg;
 
+#[derive(Debug)]
 pub struct GeneralArgs {
     pub config_file: PathBuf,
     pub log_level: LevelFilter,
+}
+
+pub fn general_args() -> impl IntoIterator<Item = impl Into<Arg>> {
+    let possible_levels = LevelFilter::iter().map(|v| v.as_str());
+
+    [
+        arg!(-c --config <FILE> "Sets a custom config file")
+            .value_parser(value_parser!(PathBuf)),
+        arg!(-l --level <LEVEL> "Sets a log level")
+            .value_parser(
+                PossibleValuesParser::new(possible_levels)
+                    .map(|s| LevelFilter::from_str(&s).unwrap()),
+            )
+            .ignore_case(true)
+            .default_value("INFO"),
+    ]
+}
+
+pub fn match_general_args(xdg: &Xdg, matches: &ArgMatches) -> GeneralArgs {
+    let log_level = *matches.get_one::<LevelFilter>("level").unwrap();
+    let config_file = matches
+        .get_one::<PathBuf>("config")
+        .cloned()
+        .unwrap_or_else(|| xdg.config_dir().join("config.toml"));
+
+    GeneralArgs {
+        config_file,
+        log_level,
+    }
 }
 
 pub fn parse_args(
@@ -20,36 +50,9 @@ pub fn parse_args(
     name: &'static str,
     args: impl IntoIterator<Item = impl Into<Arg>>,
 ) -> (ArgMatches, GeneralArgs) {
-    let possible_levels = LevelFilter::iter().map(|v| v.as_str());
+    let matches = command!(name).args(general_args()).args(args).get_matches();
 
-    let matches = command!(name)
-        .arg(
-            arg!(-c --config <FILE> "Sets a custom config file")
-                .value_parser(value_parser!(PathBuf)),
-        )
-        .arg(
-            arg!(-l --level <LEVEL> "Sets a log level")
-                .value_parser(
-                    PossibleValuesParser::new(possible_levels)
-                        .map(|s| LevelFilter::from_str(&s).unwrap()),
-                )
-                .ignore_case(true)
-                .default_value("INFO"),
-        )
-        .args(args)
-        .get_matches();
+    let general_args = match_general_args(xdg, &matches);
 
-    let log_level = *matches.get_one::<LevelFilter>("level").unwrap();
-    let config_file = matches
-        .get_one::<PathBuf>("config")
-        .cloned()
-        .unwrap_or_else(|| xdg.config_dir().join("config.toml"));
-
-    (
-        matches,
-        GeneralArgs {
-            config_file,
-            log_level,
-        },
-    )
+    (matches, general_args)
 }
