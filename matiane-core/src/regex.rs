@@ -2,6 +2,7 @@ use thiserror::Error;
 
 mod lexer;
 mod parser;
+mod run;
 
 pub struct Regex<'a> {
     src: &'a str,
@@ -26,5 +27,11 @@ impl<'a> Regex<'a> {
             src: raw_regex,
             nfa,
         })
+    }
+
+    pub fn is_match(&self, hay: &str) -> bool {
+        let exec = run::ExecRegex::new(&self.nfa);
+
+        exec.is_match(hay)
     }
 }

@@ -3,7 +3,7 @@ use super::lexer::Token;
 use std::collections::HashSet;
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum ParseError {
     #[error("Lexer failed: {0}")]
     LexerError(#[from] super::lexer::LexError),
@@ -11,8 +11,8 @@ pub enum ParseError {
     #[error("Token not implemented {0:?}")]
     UnexpectedToken(Token),
 
-    #[error("Stack is empty")]
-    EmptyStack,
+    #[error("Invalid syntax")]
+    MalformedRegex,
 }
 
 pub type ParseResult<T> = Result<T, ParseError>;
@@ -30,8 +30,10 @@ pub(super) enum State {
 
 #[derive(Debug)]
 pub(super) struct Nfa {
-    entry: StateId,
-    states: Vec<State>,
+    pub(super) entry: StateId,
+    pub(super) match_start: bool,
+    pub(super) match_end: bool,
+    pub(super) states: Vec<State>,
 }
 
 impl std::ops::Index<StateId> for Vec<State> {
@@ -92,6 +94,8 @@ impl std::ops::IndexMut<FragmentId> for Vec<Fragment> {
 #[derive(Debug)]
 pub struct NfaBuilder {
     entry: FragmentId,
+    match_start: bool,
+    match_end: bool,
     items: Vec<Fragment>,
     stack: Vec<FragmentId>,
 }
@@ -112,7 +116,7 @@ impl NfaBuilder {
     }
 
     fn pop(&mut self) -> ParseResult<FragmentId> {
-        self.stack.pop().ok_or(ParseError::EmptyStack)
+        self.stack.pop().ok_or(ParseError::MalformedRegex)
     }
 
     fn match_char(&mut self, ch: char) -> ParseResult<()> {
@@ -225,7 +229,7 @@ impl NfaBuilder {
         Ok(())
     }
 
-    pub fn build_frags(&mut self, tokens: &PostfixTokens) -> ParseResult<()> {
+    fn build_frags(&mut self, tokens: &PostfixTokens) -> ParseResult<()> {
         for &el in tokens.iter() {
             match el {
                 Token::Char(ch) => self.match_char(ch)?,
@@ -233,22 +237,23 @@ impl NfaBuilder {
                 Token::Pipe => self.pipe()?,
                 Token::Star => self.star()?,
                 Token::Plus => self.plus()?,
+                Token::Caret => self.match_start = true,
                 _ => return Err(ParseError::UnexpectedToken(el)),
             }
         }
 
         self.finish()?;
 
-        // self.finalize()?;
-
         Ok(())
     }
 
-    pub fn build_nfa(&mut self) -> ParseResult<Nfa> {
+    fn build_nfa(&mut self) -> ParseResult<Nfa> {
         let entry_id = self.pop()?;
 
         let mut nfa = Nfa {
             entry: self.items[entry_id].first.into(),
+            match_start: self.match_start,
+            match_end: self.match_end,
             states: vec![State::None; self.items.len()],
         };
 
@@ -332,6 +337,8 @@ impl NfaBuilder {
 
     pub(super) fn build(tokens: &PostfixTokens) -> ParseResult<Nfa> {
         let mut builder = NfaBuilder {
+            match_start: false,
+            match_end: false,
             entry: FragmentId(0),
             items: vec![],
             stack: vec![],
