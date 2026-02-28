@@ -38,11 +38,15 @@ pub enum Token {
 type TokenStream = Vec<Token>;
 
 #[derive(Debug, PartialEq)]
-pub(super) struct PostfixTokens(pub Vec<Token>);
+pub(super) struct PostfixTokens {
+    pub(super) match_start: bool,
+    pub(super) match_end: bool,
+    tokens: Vec<Token>,
+}
 
 impl PostfixTokens {
     pub fn iter(&self) -> std::slice::Iter<'_, Token> {
-        self.0.iter()
+        self.tokens.iter()
     }
 }
 
@@ -114,10 +118,7 @@ fn insert_concat_after(token: Token) -> bool {
 }
 
 fn insert_concat_before(token: Token) -> bool {
-    matches!(
-        token,
-        Token::Char(_) | Token::Dot | Token::LParen | Token::Dollar
-    )
+    matches!(token, Token::Char(_) | Token::Dot | Token::LParen)
 }
 
 fn precedence(token: Token) -> usize {
@@ -135,8 +136,20 @@ pub(super) fn topostfix(
 ) -> Result<PostfixTokens, LexError> {
     let mut ops: Vec<Token> = vec![];
     let mut out = vec![];
+    let mut match_start = false;
+    let mut match_last = false;
 
     for tok in tokens {
+        if tok == Token::Caret {
+            match_start = true;
+            continue;
+        }
+
+        if tok == Token::Dollar {
+            match_last = true;
+            continue;
+        }
+
         if tok == Token::LParen {
             ops.push(tok);
             continue;
@@ -197,7 +210,11 @@ pub(super) fn topostfix(
         out.push(op);
     }
 
-    Ok(PostfixTokens(out))
+    Ok(PostfixTokens {
+        match_start,
+        match_end: match_last,
+        tokens: out,
+    })
 }
 
 #[cfg(test)]
@@ -246,15 +263,8 @@ mod tests {
         let tokens = tokenize("ab*|d".chars()).unwrap();
         let postfix = topostfix(tokens).unwrap();
         assert_eq!(
-            postfix,
-            PostfixTokens(vec![
-                Char('a'),
-                Char('b'),
-                Star,
-                Concat,
-                Char('d'),
-                Pipe,
-            ])
+            postfix.tokens,
+            vec![Char('a'), Char('b'), Star, Concat, Char('d'), Pipe,]
         );
 
         // a (+) b * | d * (+) x +
@@ -263,8 +273,8 @@ mod tests {
         let postfix = topostfix(tokens).unwrap();
 
         assert_eq!(
-            postfix,
-            PostfixTokens(vec![
+            postfix.tokens,
+            vec![
                 Char('a'),
                 Char('b'),
                 Star,
@@ -275,7 +285,7 @@ mod tests {
                 Plus,
                 Concat,
                 Pipe
-            ])
+            ]
         );
     }
 
@@ -287,15 +297,8 @@ mod tests {
         let postfix = topostfix(tokens).unwrap();
 
         assert_eq!(
-            postfix,
-            PostfixTokens(vec![
-                Char('a'),
-                Char('b'),
-                Star,
-                Char('c'),
-                Pipe,
-                Concat,
-            ])
+            postfix.tokens,
+            vec![Char('a'), Char('b'), Star, Char('c'), Pipe, Concat,]
         );
     }
 

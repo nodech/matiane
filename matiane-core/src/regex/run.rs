@@ -34,7 +34,11 @@ impl<'a> ExecRegex<'a> {
                         states.push(out1);
                         states.push(out2);
                     }
-                    State::Finish => return true,
+                    State::Finish => {
+                        if !self.nfa.match_end {
+                            return true;
+                        }
+                    }
                     State::None => panic!("Unexpected state."),
                 }
             }
@@ -47,7 +51,6 @@ impl<'a> ExecRegex<'a> {
         while let Some(state_id) = states.pop() {
             let state = self.nfa.states[state_id];
 
-            // println!("Final checking... {:?}", state);
             match state {
                 State::Match { .. } => continue,
                 State::Split { out1, out2 } => {
@@ -148,7 +151,6 @@ mod tests {
         let regex = Regex::compile("a*a*a*a*a*a*aaa").unwrap();
 
         assert_all_matches!(regex, ["aaa", "aaaa",]);
-
         assert_none_matches!(regex, ["bbb", "bba",])
     }
 
@@ -157,7 +159,26 @@ mod tests {
         let regex = Regex::compile("^aaa").unwrap();
 
         assert_all_matches!(regex, ["aaa", "aaammmm", "aaaaaaaa",]);
-
         assert_none_matches!(regex, ["baaaaa", "aabbaaa", "bbbaaaaabb",]);
+    }
+
+    #[test]
+    fn test_is_match_last() {
+        let regex = Regex::compile("aaa$").unwrap();
+
+        assert_all_matches!(regex, ["aaa", "mmmmaaa", "aaaaaaaa",]);
+        assert_none_matches!(regex, ["aaaab", "aaabbaaab", "bbbaaaaabb",]);
+    }
+
+    #[test]
+    fn test_is_match_start_to_end() {
+        let regex = Regex::compile("^abbc*d$").unwrap();
+
+        assert_all_matches!(regex, ["abbcd", "abbcccd", "abbd",]);
+
+        assert_none_matches!(
+            regex,
+            ["aabbcd", "aabbcccd", "aabbd", "abbcda", "abbcccda", "abbda",]
+        )
     }
 }

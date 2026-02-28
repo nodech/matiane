@@ -237,7 +237,6 @@ impl NfaBuilder {
                 Token::Pipe => self.pipe()?,
                 Token::Star => self.star()?,
                 Token::Plus => self.plus()?,
-                Token::Caret => self.match_start = true,
                 _ => return Err(ParseError::UnexpectedToken(el)),
             }
         }
@@ -337,8 +336,8 @@ impl NfaBuilder {
 
     pub(super) fn build(tokens: &PostfixTokens) -> ParseResult<Nfa> {
         let mut builder = NfaBuilder {
-            match_start: false,
-            match_end: false,
+            match_start: tokens.match_start,
+            match_end: tokens.match_end,
             entry: FragmentId(0),
             items: vec![],
             stack: vec![],
