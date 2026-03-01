@@ -152,6 +152,13 @@ impl NfaBuilder {
         self.items[left_last].next = Some(right);
         self.items[left_last].last = right;
 
+        // let left_last = self.items[left].last;
+        // let right_first = self.items[right].first;
+        // let right_last = self.items[right].last;
+        //
+        // self.items[left_last].next = Some(right_first);
+        // self.items[left_last].last = right_last;
+
         self.push_fragment(fragment);
 
         Ok(())
@@ -203,6 +210,7 @@ impl NfaBuilder {
             id: frag_id,
             state: FragmentState::Optional { out1: last },
             first: frag_id,
+            // first: self.items[last].first,
             last: frag_id,
             next: None,
         };
@@ -732,5 +740,65 @@ mod tests {
 
         assert_eq!(nfa.states, expected);
         assert_eq!(nfa.entry, StateId(6));
+    }
+
+    #[test]
+    fn test_bastar() {
+        let tokens = tokenize("ba*".chars()).unwrap();
+        let postfix = topostfix(tokens).unwrap();
+        let nfa = NfaBuilder::build(&postfix).unwrap();
+
+        let expected = [
+            State::Match {
+                // 0
+                symbol: 'b',
+                next: StateId(2),
+            },
+            State::Match {
+                // 1
+                symbol: 'a',
+                next: StateId(2),
+            },
+            State::Split {
+                // 2
+                out1: StateId(1),
+                out2: StateId(4),
+            },
+            State::None,   // 3
+            State::Finish, // 4
+            State::None,   // 5
+        ];
+
+        assert_eq!(nfa.states, expected);
+    }
+
+    #[test]
+    fn test_baplus() {
+        let tokens = tokenize("ba+".chars()).unwrap();
+        let postfix = topostfix(tokens).unwrap();
+        let nfa = NfaBuilder::build(&postfix).unwrap();
+
+        let expected = [
+            State::Match {
+                // 0
+                symbol: 'b',
+                next: StateId(1),
+            },
+            State::Match {
+                // 1
+                symbol: 'a',
+                next: StateId(2),
+            },
+            State::Split {
+                // 2
+                out1: StateId(1),
+                out2: StateId(4),
+            },
+            State::None,   // 3
+            State::Finish, // 4
+            State::None,   // 5
+        ];
+
+        assert_eq!(nfa.states, expected);
     }
 }

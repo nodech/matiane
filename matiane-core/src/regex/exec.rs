@@ -147,6 +147,16 @@ mod tests {
     }
 
     #[test]
+    fn test_is_match_one_repeat() {
+        let regex = Regex::compile("fa+").unwrap();
+
+        assert_all_matches!(
+            regex,
+            ["far", "faar", "#far#", "faarbb", "faaaaaar",]
+        );
+    }
+
+    #[test]
     fn test_is_this_exploding() {
         let regex = Regex::compile("a*a*a*a*a*a*aaa").unwrap();
 
@@ -172,10 +182,9 @@ mod tests {
 
     #[test]
     fn test_is_match_start_to_end() {
-        let regex = Regex::compile("^abbc*d$").unwrap();
+        let regex = Regex::compile("^abbc+d$").unwrap();
 
-        assert_all_matches!(regex, ["abbcd", "abbcccd", "abbd",]);
-
+        assert_all_matches!(regex, ["abbcd", "abbcccd", "abbcccccd",]);
         assert_none_matches!(
             regex,
             ["aabbcd", "aabbcccd", "aabbd", "abbcda", "abbcccda", "abbda",]

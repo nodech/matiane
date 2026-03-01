@@ -1,8 +1,8 @@
 use thiserror::Error;
 
+mod exec;
 mod lexer;
 mod parser;
-mod run;
 
 pub struct Regex<'a> {
     src: &'a str,
@@ -30,7 +30,7 @@ impl<'a> Regex<'a> {
     }
 
     pub fn is_match(&self, hay: &str) -> bool {
-        let exec = run::ExecRegex::new(&self.nfa);
+        let exec = exec::ExecRegex::new(&self.nfa);
 
         exec.is_match(hay)
     }
