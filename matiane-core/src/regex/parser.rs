@@ -62,7 +62,7 @@ impl From<FragmentId> for StateId {
 #[derive(Debug, Clone, Copy)]
 enum FragmentState {
     Match { symbol: char },
-    Accept,
+    Finish,
     Split { out1: FragmentId, out2: FragmentId },
     Optional { out1: FragmentId },
 }
@@ -92,7 +92,6 @@ impl std::ops::IndexMut<FragmentId> for Vec<Fragment> {
 
 #[derive(Debug)]
 pub struct NfaBuilder {
-    entry: FragmentId,
     match_start: bool,
     match_end: bool,
     items: Vec<Fragment>,
@@ -211,7 +210,7 @@ impl NfaBuilder {
         let frag_id = self.next_frag_id();
         self.push_fragment(Fragment {
             id: frag_id,
-            state: FragmentState::Accept,
+            state: FragmentState::Finish,
             first: frag_id,
             last: frag_id,
             next: None,
@@ -253,13 +252,7 @@ impl NfaBuilder {
         let mut visited = HashSet::<FragmentId>::new();
 
         while let Some(frag_id) = fragments.pop() {
-            let Fragment {
-                state,
-                first,
-                // last,
-                next,
-                ..
-            } = self.items[frag_id];
+            let Fragment { state, next, .. } = self.items[frag_id];
 
             let state_id: StateId = frag_id.into();
 
@@ -314,7 +307,7 @@ impl NfaBuilder {
                         out2: next.into(),
                     }
                 }
-                FragmentState::Accept => {
+                FragmentState::Finish => {
                     nfa.states[state_id] = State::Finish;
                 }
             }
@@ -327,7 +320,6 @@ impl NfaBuilder {
         let mut builder = NfaBuilder {
             match_start: tokens.match_start,
             match_end: tokens.match_end,
-            entry: FragmentId(0),
             items: vec![],
             stack: vec![],
         };
@@ -722,6 +714,7 @@ mod tests {
         ];
 
         assert_eq!(nfa.states, expected);
+        assert_eq!(nfa.entry, StateId(0));
     }
 
     #[test]
@@ -750,5 +743,6 @@ mod tests {
         ];
 
         assert_eq!(nfa.states, expected);
+        assert_eq!(nfa.entry, StateId(0));
     }
 }
