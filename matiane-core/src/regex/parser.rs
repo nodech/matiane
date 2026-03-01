@@ -62,7 +62,6 @@ impl From<FragmentId> for StateId {
 #[derive(Debug, Clone, Copy)]
 enum FragmentState {
     Match { symbol: char },
-    Concat,
     Accept,
     Split { out1: FragmentId, out2: FragmentId },
     Optional { out1: FragmentId },
@@ -138,28 +137,14 @@ impl NfaBuilder {
         let right = self.pop()?;
         let left = self.pop()?;
 
-        let frag_id = self.next_frag_id();
-        let fragment = Fragment {
-            id: frag_id,
-            state: FragmentState::Concat,
-            first: self.items[left].first,
-            last: self.items[right].last,
-            next: None,
-        };
-
-        // first last would be the same
+        // we continue chain from the last.
         let left_last = self.items[left].last;
         self.items[left_last].next = Some(right);
-        self.items[left_last].last = right;
 
-        // let left_last = self.items[left].last;
-        // let right_first = self.items[right].first;
-        // let right_last = self.items[right].last;
-        //
-        // self.items[left_last].next = Some(right_first);
-        // self.items[left_last].last = right_last;
+        // update the first item(left)s last.
+        self.items[left].last = self.items[right].last;
 
-        self.push_fragment(fragment);
+        self.push(left);
 
         Ok(())
     }
@@ -299,10 +284,6 @@ impl NfaBuilder {
                         next: next.into(),
                     }
                 }
-                FragmentState::Concat => {
-                    nfa.states[state_id] = State::None;
-                    fragments.push(first);
-                }
                 FragmentState::Split { out1, out2 } => {
                     fragments.push(out1);
                     fragments.push(out2);
@@ -373,7 +354,6 @@ mod tests {
                 next: StateId(1),
             },
             State::Finish,
-            State::None,
         ];
 
         assert_eq!(nfa.states, expected);
@@ -393,16 +373,13 @@ mod tests {
             },
             State::Match {
                 symbol: 'b',
-                next: StateId(3),
+                next: StateId(2),
             },
-            State::None,
             State::Match {
                 symbol: 'c',
-                next: StateId(5),
+                next: StateId(3),
             },
-            State::None,
             State::Finish,
-            State::None,
         ];
 
         assert_eq!(nfa.states, expected);
@@ -422,21 +399,17 @@ mod tests {
             },
             State::Match {
                 symbol: 'b',
-                next: StateId(3),
+                next: StateId(2),
             },
-            State::None,
             State::Match {
                 symbol: 'c',
-                next: StateId(5),
+                next: StateId(3),
             },
-            State::None,
             State::Match {
                 symbol: 'd',
-                next: StateId(7),
+                next: StateId(4),
             },
-            State::None,
             State::Finish,
-            State::None,
         ];
         assert_eq!(nfa.states, expected);
         assert_eq!(nfa.entry, StateId(0));
@@ -450,32 +423,26 @@ mod tests {
 
         let expected = vec![
             State::Match {
-                // 0
                 symbol: 'a',
                 next: StateId(1),
             },
             State::Match {
-                // 1
                 symbol: 'b',
-                next: StateId(5),
+                next: StateId(4),
             },
-            State::None, // 2
             State::Match {
-                // 3
                 symbol: 'd',
-                next: StateId(5),
+                next: StateId(4),
             },
             State::Split {
-                // 4
                 out1: StateId(0),
-                out2: StateId(3),
+                out2: StateId(2),
             },
-            State::Finish, // 5
-            State::None,   // 6
+            State::Finish,
         ];
 
         assert_eq!(nfa.states, expected);
-        assert_eq!(nfa.entry, StateId(4));
+        assert_eq!(nfa.entry, StateId(3));
     }
 
     #[test]
@@ -493,30 +460,27 @@ mod tests {
             State::Match {
                 // 1
                 symbol: 'b',
-                next: StateId(7),
+                next: StateId(5),
             },
-            State::None, // 2
+            State::Match {
+                // 2
+                symbol: 'c',
+                next: StateId(3),
+            },
             State::Match {
                 // 3
-                symbol: 'c',
-                next: StateId(4),
-            },
-            State::Match {
-                // 4
                 symbol: 'd',
-                next: StateId(7),
+                next: StateId(5),
             },
-            State::None, // 5
             State::Split {
-                // 6
+                // 4
                 out1: StateId(0),
-                out2: StateId(3),
+                out2: StateId(2),
             },
-            State::Finish, // 7
-            State::None,   // 8
+            State::Finish, // 5
         ];
         assert_eq!(nfa.states, expected);
-        assert_eq!(nfa.entry, StateId(6));
+        assert_eq!(nfa.entry, StateId(4));
     }
 
     #[test]
@@ -544,31 +508,28 @@ mod tests {
             State::Match {
                 // 3
                 symbol: 'd',
-                next: StateId(9),
+                next: StateId(7),
             },
-            State::None, // 4
+            State::Match {
+                // 4
+                symbol: 'i',
+                next: StateId(5),
+            },
             State::Match {
                 // 5
-                symbol: 'i',
-                next: StateId(6),
-            },
-            State::Match {
-                // 6
                 symbol: 'o',
-                next: StateId(9),
+                next: StateId(7),
             },
-            State::None, // 7
             State::Split {
-                // 8
+                // 6
                 out1: StateId(2),
-                out2: StateId(5),
+                out2: StateId(4),
             },
-            State::Finish, // 9
-            State::None,
+            State::Finish, // 7
         ];
 
         assert_eq!(nfa.states, expected);
-        assert_eq!(nfa.entry, StateId(8));
+        assert_eq!(nfa.entry, StateId(6));
     }
 
     #[test]
@@ -592,19 +553,17 @@ mod tests {
             },
             State::Match {
                 symbol: 'c',
-                next: StateId(7),
+                next: StateId(6),
             },
             State::Match {
                 symbol: 'd',
-                next: StateId(7),
+                next: StateId(6),
             },
             State::Split {
                 out1: StateId(3),
                 out2: StateId(4),
             },
-            State::None,
             State::Finish,
-            State::None,
         ];
 
         assert_eq!(nfa.states, expected);
@@ -644,7 +603,6 @@ mod tests {
                 out2: StateId(3),
             },
             State::Finish, // 5
-            State::None,
         ];
 
         assert_eq!(nfa.states, expected);
@@ -694,7 +652,6 @@ mod tests {
                 out2: StateId(5),
             },
             State::Finish, // 7
-            State::None,
         ];
         assert_eq!(nfa.states, expected);
         assert_eq!(nfa.entry, StateId(6));
@@ -715,31 +672,28 @@ mod tests {
             State::Split {
                 // 1
                 out1: StateId(0),
-                out2: StateId(7),
+                out2: StateId(5),
             },
-            State::None, // 2
             State::Match {
-                // 3
+                // 2
                 symbol: 'b',
-                next: StateId(4),
+                next: StateId(3),
+            },
+            State::Split {
+                // 3
+                out1: StateId(2),
+                out2: StateId(5),
             },
             State::Split {
                 // 4
-                out1: StateId(3),
-                out2: StateId(7),
-            },
-            State::None, // 5
-            State::Split {
-                // 6
                 out1: StateId(0),
-                out2: StateId(3),
+                out2: StateId(2),
             },
-            State::Finish, // 7
-            State::None,
+            State::Finish, // 5
         ];
 
         assert_eq!(nfa.states, expected);
-        assert_eq!(nfa.entry, StateId(6));
+        assert_eq!(nfa.entry, StateId(4));
     }
 
     #[test]
@@ -762,11 +716,9 @@ mod tests {
             State::Split {
                 // 2
                 out1: StateId(1),
-                out2: StateId(4),
+                out2: StateId(3),
             },
-            State::None,   // 3
-            State::Finish, // 4
-            State::None,   // 5
+            State::Finish, // 3
         ];
 
         assert_eq!(nfa.states, expected);
@@ -792,11 +744,9 @@ mod tests {
             State::Split {
                 // 2
                 out1: StateId(1),
-                out2: StateId(4),
+                out2: StateId(3),
             },
-            State::None,   // 3
-            State::Finish, // 4
-            State::None,   // 5
+            State::Finish, // 3
         ];
 
         assert_eq!(nfa.states, expected);
