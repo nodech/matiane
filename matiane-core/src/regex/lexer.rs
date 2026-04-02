@@ -9,6 +9,8 @@ pub enum LexError {
     UnexpectedCaret(usize),
     #[error("Unexpected dollar at {0}")]
     UnexpectedDollar(usize),
+    #[error("Unsupported token {token:?} at {pos}")]
+    UnsupportedToken { token: Token, pos: usize },
     #[error("Unbalance parens")]
     UnbalancedParens,
 }
@@ -16,14 +18,15 @@ pub enum LexError {
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Token {
     Char(char),
-    Dot,    // .
-    Star,   // *
-    Plus,   // +
-    Caret,  // ^
-    Dollar, // $
-    Pipe,   // |
-    LParen, // (
-    RParen, // )
+    Dot,      // .
+    Question, // ?
+    Star,     // *
+    Plus,     // +
+    Caret,    // ^
+    Dollar,   // $
+    Pipe,     // |
+    LParen,   // (
+    RParen,   // )
     // LBracket, // [
     // RBracket, // ]
     // LBrace,   // {
@@ -87,6 +90,7 @@ pub(super) fn tokenize(
             '(' => Token::LParen,
             ')' => Token::RParen,
             '.' => Token::Dot,
+            '?' => Token::Question,
             '|' => Token::Pipe,
             '*' => Token::Star,
             '+' => Token::Plus,
@@ -254,6 +258,11 @@ mod tests {
             tokenize("^ab*|d".chars()).unwrap(),
             vec![Caret, Char('a'), Concat, Char('b'), Star, Pipe, Char('d')]
         );
+    }
+
+    #[test]
+    fn test_question_token() {
+        assert_eq!(tokenize("a?".chars()), Ok(vec![Char('a'), Question]));
     }
 
     #[test]

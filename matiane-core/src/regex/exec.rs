@@ -1,5 +1,5 @@
 use super::parser::Nfa;
-use super::parser::State;
+use super::parser::NfaState;
 
 pub(super) struct ExecRegex<'a> {
     nfa: &'a Nfa,
@@ -25,21 +25,21 @@ impl<'a> ExecRegex<'a> {
                 let state = self.nfa.states[state_id];
 
                 match state {
-                    State::Match { symbol, next } => {
+                    NfaState::Match { symbol, next } => {
                         if ch == symbol {
                             next_states.push(next);
                         }
                     }
-                    State::Split { out1, out2 } => {
+                    NfaState::Split { out1, out2 } => {
                         states.push(out1);
                         states.push(out2);
                     }
-                    State::Finish => {
+                    NfaState::Finish => {
                         if !self.nfa.match_end {
                             return true;
                         }
                     }
-                    State::None => panic!("Unexpected state."),
+                    NfaState::None => panic!("Unexpected state."),
                 }
             }
 
@@ -52,12 +52,12 @@ impl<'a> ExecRegex<'a> {
             let state = self.nfa.states[state_id];
 
             match state {
-                State::Match { .. } => continue,
-                State::Split { out1, out2 } => {
+                NfaState::Match { .. } => continue,
+                NfaState::Split { out1, out2 } => {
                     states.push(out1);
                     states.push(out2);
                 }
-                State::Finish => return true,
+                NfaState::Finish => return true,
                 _ => panic!("Unexpected state."),
             }
         }

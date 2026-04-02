@@ -8,8 +8,11 @@ pub enum ParseError {
     #[error("Lexer failed: {0}")]
     LexerError(#[from] super::lexer::LexError),
 
-    #[error("Token not implemented {0:?}")]
-    UnexpectedToken(Token),
+    #[error("Unsupported token {0:?}")]
+    UnsupportedToken(Token),
+
+    #[error("Empty regex")]
+    EmptyRegex,
 
     #[error("Invalid syntax")]
     MalformedRegex,
@@ -21,7 +24,7 @@ pub type ParseResult<T> = Result<T, ParseError>;
 pub(super) struct StateId(usize);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum State {
+pub(super) enum NfaState {
     Split { out1: StateId, out2: StateId },
     Match { symbol: char, next: StateId },
     Finish,
@@ -33,18 +36,18 @@ pub(super) struct Nfa {
     pub(super) entry: StateId,
     pub(super) match_start: bool,
     pub(super) match_end: bool,
-    pub(super) states: Vec<State>,
+    pub(super) states: Vec<NfaState>,
 }
 
-impl std::ops::Index<StateId> for Vec<State> {
-    type Output = State;
+impl std::ops::Index<StateId> for Vec<NfaState> {
+    type Output = NfaState;
 
     fn index(&self, index: StateId) -> &Self::Output {
         &self[index.0]
     }
 }
 
-impl std::ops::IndexMut<StateId> for Vec<State> {
+impl std::ops::IndexMut<StateId> for Vec<NfaState> {
     fn index_mut(&mut self, index: StateId) -> &mut Self::Output {
         &mut self[index.0]
     }
@@ -64,6 +67,7 @@ enum FragmentState {
     Match { symbol: char },
     Finish,
     Split { out1: FragmentId, out2: FragmentId },
+    OptRepeat { out1: FragmentId },
     Optional { out1: FragmentId },
 }
 
@@ -136,11 +140,11 @@ impl NfaBuilder {
         let right = self.pop()?;
         let left = self.pop()?;
 
-        // we continue chain from the last.
+        // We continue chain from the last.
         let left_last = self.items[left].last;
         self.items[left_last].next = Some(right);
 
-        // update the first item(left)s last.
+        // Update the first items (left) last.
         self.items[left].last = self.items[right].last;
 
         self.push(left);
@@ -175,7 +179,7 @@ impl NfaBuilder {
         let frag_id = self.next_frag_id();
         let fragment = Fragment {
             id: frag_id,
-            state: FragmentState::Optional { out1: last },
+            state: FragmentState::OptRepeat { out1: last },
             first: frag_id,
             last: frag_id,
             next: None,
@@ -192,9 +196,8 @@ impl NfaBuilder {
         let frag_id = self.next_frag_id();
         let fragment = Fragment {
             id: frag_id,
-            state: FragmentState::Optional { out1: last },
+            state: FragmentState::OptRepeat { out1: last },
             first: frag_id,
-            // first: self.items[last].first,
             last: frag_id,
             next: None,
         };
@@ -206,7 +209,28 @@ impl NfaBuilder {
         Ok(())
     }
 
+    fn question(&mut self) -> ParseResult<()> {
+        let last = self.pop()?;
+
+        let frag_id = self.next_frag_id();
+        let fragment = Fragment {
+            id: frag_id,
+            state: FragmentState::Optional { out1: last },
+            first: frag_id,
+            last: frag_id,
+            next: None,
+        };
+
+        self.push_fragment(fragment);
+
+        Ok(())
+    }
+
     fn finish(&mut self) -> ParseResult<()> {
+        if self.stack.is_empty() {
+            return Err(ParseError::EmptyRegex);
+        }
+
         let frag_id = self.next_frag_id();
         self.push_fragment(Fragment {
             id: frag_id,
@@ -229,7 +253,8 @@ impl NfaBuilder {
                 Token::Pipe => self.pipe()?,
                 Token::Star => self.star()?,
                 Token::Plus => self.plus()?,
-                _ => return Err(ParseError::UnexpectedToken(el)),
+                Token::Question => self.question()?,
+                _ => return Err(ParseError::UnsupportedToken(el)),
             }
         }
 
@@ -245,7 +270,7 @@ impl NfaBuilder {
             entry: self.items[entry_id].first.into(),
             match_start: self.match_start,
             match_end: self.match_end,
-            states: vec![State::None; self.items.len()],
+            states: vec![NfaState::None; self.items.len()],
         };
 
         let mut fragments = vec![entry_id];
@@ -272,7 +297,7 @@ impl NfaBuilder {
 
                     fragments.push(next);
 
-                    nfa.states[state_id] = State::Match {
+                    nfa.states[state_id] = NfaState::Match {
                         symbol,
                         next: next.into(),
                     }
@@ -286,9 +311,26 @@ impl NfaBuilder {
                     let last_out2 = self.items[out2].last;
                     self.items[last_out2].next = next;
 
-                    nfa.states[state_id] = State::Split {
+                    nfa.states[state_id] = NfaState::Split {
                         out1: out1.into(),
                         out2: out2.into(),
+                    }
+                }
+                FragmentState::OptRepeat { out1 } => {
+                    let next = next.unwrap_or_else(|| {
+                        unreachable!("OptRepeat must always have a next.")
+                    });
+
+                    fragments.push(out1);
+                    fragments.push(next);
+
+                    let last_out1 = self.items[out1].last;
+                    // Loop on itself.
+                    self.items[last_out1].next = Some(frag_id);
+
+                    nfa.states[state_id] = NfaState::Split {
+                        out1: out1.into(),
+                        out2: next.into(),
                     }
                 }
                 FragmentState::Optional { out1 } => {
@@ -299,16 +341,17 @@ impl NfaBuilder {
                     fragments.push(out1);
                     fragments.push(next);
 
-                    let last_out1 = self.items[out1].last;
-                    self.items[last_out1].next = Some(frag_id);
+                    let last_out = self.items[out1].last;
+                    // Go to the next.
+                    self.items[last_out].next = Some(next);
 
-                    nfa.states[state_id] = State::Split {
+                    nfa.states[state_id] = NfaState::Split {
                         out1: out1.into(),
                         out2: next.into(),
                     }
                 }
                 FragmentState::Finish => {
-                    nfa.states[state_id] = State::Finish;
+                    nfa.states[state_id] = NfaState::Finish;
                 }
             }
         }
@@ -341,11 +384,11 @@ mod tests {
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = vec![
-            State::Match {
+            NfaState::Match {
                 symbol: 'a',
                 next: StateId(1),
             },
-            State::Finish,
+            NfaState::Finish,
         ];
 
         assert_eq!(nfa.states, expected);
@@ -359,19 +402,19 @@ mod tests {
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = vec![
-            State::Match {
+            NfaState::Match {
                 symbol: 'a',
                 next: StateId(1),
             },
-            State::Match {
+            NfaState::Match {
                 symbol: 'b',
                 next: StateId(2),
             },
-            State::Match {
+            NfaState::Match {
                 symbol: 'c',
                 next: StateId(3),
             },
-            State::Finish,
+            NfaState::Finish,
         ];
 
         assert_eq!(nfa.states, expected);
@@ -385,23 +428,23 @@ mod tests {
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = vec![
-            State::Match {
+            NfaState::Match {
                 symbol: 'a',
                 next: StateId(1),
             },
-            State::Match {
+            NfaState::Match {
                 symbol: 'b',
                 next: StateId(2),
             },
-            State::Match {
+            NfaState::Match {
                 symbol: 'c',
                 next: StateId(3),
             },
-            State::Match {
+            NfaState::Match {
                 symbol: 'd',
                 next: StateId(4),
             },
-            State::Finish,
+            NfaState::Finish,
         ];
         assert_eq!(nfa.states, expected);
         assert_eq!(nfa.entry, StateId(0));
@@ -414,23 +457,23 @@ mod tests {
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = vec![
-            State::Match {
+            NfaState::Match {
                 symbol: 'a',
                 next: StateId(1),
             },
-            State::Match {
+            NfaState::Match {
                 symbol: 'b',
                 next: StateId(4),
             },
-            State::Match {
+            NfaState::Match {
                 symbol: 'd',
                 next: StateId(4),
             },
-            State::Split {
+            NfaState::Split {
                 out1: StateId(0),
                 out2: StateId(2),
             },
-            State::Finish,
+            NfaState::Finish,
         ];
 
         assert_eq!(nfa.states, expected);
@@ -444,32 +487,32 @@ mod tests {
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = vec![
-            State::Match {
+            NfaState::Match {
                 // 0
                 symbol: 'a',
                 next: StateId(1),
             },
-            State::Match {
+            NfaState::Match {
                 // 1
                 symbol: 'b',
                 next: StateId(5),
             },
-            State::Match {
+            NfaState::Match {
                 // 2
                 symbol: 'c',
                 next: StateId(3),
             },
-            State::Match {
+            NfaState::Match {
                 // 3
                 symbol: 'd',
                 next: StateId(5),
             },
-            State::Split {
+            NfaState::Split {
                 // 4
                 out1: StateId(0),
                 out2: StateId(2),
             },
-            State::Finish, // 5
+            NfaState::Finish, // 5
         ];
         assert_eq!(nfa.states, expected);
         assert_eq!(nfa.entry, StateId(4));
@@ -482,42 +525,42 @@ mod tests {
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = vec![
-            State::Match {
+            NfaState::Match {
                 // 0
                 symbol: 'a',
                 next: StateId(3),
             },
-            State::Match {
+            NfaState::Match {
                 // 1
                 symbol: 'c',
                 next: StateId(3),
             },
-            State::Split {
+            NfaState::Split {
                 // 2
                 out1: StateId(0),
                 out2: StateId(1),
             },
-            State::Match {
+            NfaState::Match {
                 // 3
                 symbol: 'd',
                 next: StateId(7),
             },
-            State::Match {
+            NfaState::Match {
                 // 4
                 symbol: 'i',
                 next: StateId(5),
             },
-            State::Match {
+            NfaState::Match {
                 // 5
                 symbol: 'o',
                 next: StateId(7),
             },
-            State::Split {
+            NfaState::Split {
                 // 6
                 out1: StateId(2),
                 out2: StateId(4),
             },
-            State::Finish, // 7
+            NfaState::Finish, // 7
         ];
 
         assert_eq!(nfa.states, expected);
@@ -531,31 +574,31 @@ mod tests {
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = vec![
-            State::Match {
+            NfaState::Match {
                 symbol: 'a',
                 next: StateId(5),
             },
-            State::Match {
+            NfaState::Match {
                 symbol: 'b',
                 next: StateId(5),
             },
-            State::Split {
+            NfaState::Split {
                 out1: StateId(0),
                 out2: StateId(1),
             },
-            State::Match {
+            NfaState::Match {
                 symbol: 'c',
                 next: StateId(6),
             },
-            State::Match {
+            NfaState::Match {
                 symbol: 'd',
                 next: StateId(6),
             },
-            State::Split {
+            NfaState::Split {
                 out1: StateId(3),
                 out2: StateId(4),
             },
-            State::Finish,
+            NfaState::Finish,
         ];
 
         assert_eq!(nfa.states, expected);
@@ -569,32 +612,32 @@ mod tests {
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = [
-            State::Match {
+            NfaState::Match {
                 // 0
                 symbol: 'a',
                 next: StateId(1),
             },
-            State::Split {
+            NfaState::Split {
                 // 1
                 out1: StateId(0),
                 out2: StateId(5),
             },
-            State::Match {
+            NfaState::Match {
                 // 2
                 symbol: 'b',
                 next: StateId(3),
             },
-            State::Split {
+            NfaState::Split {
                 // 3
                 out1: StateId(2),
                 out2: StateId(5),
             },
-            State::Split {
+            NfaState::Split {
                 // 4
                 out1: StateId(1),
                 out2: StateId(3),
             },
-            State::Finish, // 5
+            NfaState::Finish, // 5
         ];
 
         assert_eq!(nfa.states, expected);
@@ -608,42 +651,42 @@ mod tests {
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = [
-            State::Match {
+            NfaState::Match {
                 // 0
                 symbol: 'a',
                 next: StateId(3),
             },
-            State::Match {
+            NfaState::Match {
                 // 1
                 symbol: 'b',
                 next: StateId(3),
             },
-            State::Split {
+            NfaState::Split {
                 // 2
                 out1: StateId(0),
                 out2: StateId(1),
             },
-            State::Split {
+            NfaState::Split {
                 // 3
                 out1: StateId(2),
                 out2: StateId(7),
             },
-            State::Match {
+            NfaState::Match {
                 // 4
                 symbol: 'b',
                 next: StateId(5),
             },
-            State::Split {
+            NfaState::Split {
                 // 5
                 out1: StateId(4),
                 out2: StateId(7),
             },
-            State::Split {
+            NfaState::Split {
                 // 6
                 out1: StateId(3),
                 out2: StateId(5),
             },
-            State::Finish, // 7
+            NfaState::Finish, // 7
         ];
         assert_eq!(nfa.states, expected);
         assert_eq!(nfa.entry, StateId(6));
@@ -656,32 +699,32 @@ mod tests {
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = [
-            State::Match {
+            NfaState::Match {
                 // 0
                 symbol: 'a',
                 next: StateId(1),
             },
-            State::Split {
+            NfaState::Split {
                 // 1
                 out1: StateId(0),
                 out2: StateId(5),
             },
-            State::Match {
+            NfaState::Match {
                 // 2
                 symbol: 'b',
                 next: StateId(3),
             },
-            State::Split {
+            NfaState::Split {
                 // 3
                 out1: StateId(2),
                 out2: StateId(5),
             },
-            State::Split {
+            NfaState::Split {
                 // 4
                 out1: StateId(0),
                 out2: StateId(2),
             },
-            State::Finish, // 5
+            NfaState::Finish, // 5
         ];
 
         assert_eq!(nfa.states, expected);
@@ -695,22 +738,22 @@ mod tests {
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = [
-            State::Match {
+            NfaState::Match {
                 // 0
                 symbol: 'b',
                 next: StateId(2),
             },
-            State::Match {
+            NfaState::Match {
                 // 1
                 symbol: 'a',
                 next: StateId(2),
             },
-            State::Split {
+            NfaState::Split {
                 // 2
                 out1: StateId(1),
                 out2: StateId(3),
             },
-            State::Finish, // 3
+            NfaState::Finish, // 3
         ];
 
         assert_eq!(nfa.states, expected);
@@ -724,25 +767,87 @@ mod tests {
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = [
-            State::Match {
+            NfaState::Match {
                 // 0
                 symbol: 'b',
                 next: StateId(1),
             },
-            State::Match {
+            NfaState::Match {
                 // 1
                 symbol: 'a',
                 next: StateId(2),
             },
-            State::Split {
+            NfaState::Split {
                 // 2
                 out1: StateId(1),
                 out2: StateId(3),
             },
-            State::Finish, // 3
+            NfaState::Finish, // 3
         ];
 
         assert_eq!(nfa.states, expected);
         assert_eq!(nfa.entry, StateId(0));
+    }
+
+    #[test]
+    fn test_optional_lit() {
+        let tokens = tokenize("ba?".chars()).unwrap();
+        let postfix = topostfix(tokens).unwrap();
+        let nfa = NfaBuilder::build(&postfix).unwrap();
+
+        let expected = [
+            NfaState::Match {
+                // 0
+                symbol: 'b',
+                next: StateId(2),
+            },
+            NfaState::Match {
+                // 1
+                symbol: 'a',
+                next: StateId(3),
+            },
+            NfaState::Split {
+                // 2
+                out1: StateId(1),
+                out2: StateId(3),
+            },
+            NfaState::Finish, // 3
+        ];
+
+        assert_eq!(nfa.states, expected);
+        assert_eq!(nfa.entry, StateId(0));
+    }
+
+    #[test]
+    fn test_empty_regex_is_rejected() {
+        let tokens = tokenize("".chars()).unwrap();
+        let postfix = topostfix(tokens).unwrap();
+
+        assert!(matches!(
+            NfaBuilder::build(&postfix),
+            Err(ParseError::EmptyRegex)
+        ));
+    }
+
+    #[test]
+    fn test_dangling_pipe_is_rejected() {
+        let tokens = tokenize("a|".chars()).unwrap();
+        let postfix = topostfix(tokens).unwrap();
+
+        assert!(matches!(
+            NfaBuilder::build(&postfix),
+            Err(ParseError::MalformedRegex)
+        ));
+    }
+
+    #[test]
+    fn test_leading_quantifier_is_rejected() {
+        let tokens = tokenize("*a".chars()).unwrap();
+        let postfix = topostfix(tokens).unwrap();
+
+        assert!(matches!(
+            NfaBuilder::build(&postfix),
+            Err(ParseError::MalformedRegex)
+        ));
     }
 }
