@@ -190,4 +190,12 @@ mod tests {
             ["aabbcd", "aabbcccd", "aabbd", "abbcda", "abbcccda", "abbda",]
         )
     }
+
+    #[test]
+    fn test_is_match_optional() {
+        let regex = Regex::compile("abc?d").unwrap();
+
+        assert_all_matches!(regex, ["abcd", "abd", "aaabd", "----abcd------"]);
+        assert_none_matches!(regex, ["acd", "aaa", "bbbbbbbbb"]);
+    }
 }

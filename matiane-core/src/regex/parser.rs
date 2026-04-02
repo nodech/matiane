@@ -819,6 +819,45 @@ mod tests {
     }
 
     #[test]
+    fn test_optional_abcd() {
+        let tokens = tokenize("abc?d".chars()).unwrap();
+        let postfix = topostfix(tokens).unwrap();
+        let nfa = NfaBuilder::build(&postfix).unwrap();
+
+        let expected = [
+            NfaState::Match {
+                // 0
+                symbol: 'a',
+                next: StateId(1),
+            },
+            NfaState::Match {
+                // 1
+                symbol: 'b',
+                next: StateId(3),
+            },
+            NfaState::Match {
+                // 2
+                symbol: 'c',
+                next: StateId(4),
+            },
+            NfaState::Split {
+                // 3
+                out1: StateId(2),
+                out2: StateId(4),
+            },
+            NfaState::Match {
+                // 4
+                symbol: 'd',
+                next: StateId(5),
+            },
+            NfaState::Finish, // 5
+        ];
+
+        assert_eq!(nfa.states, expected);
+        assert_eq!(nfa.entry, StateId(0));
+    }
+
+    #[test]
     fn test_empty_regex_is_rejected() {
         let tokens = tokenize("".chars()).unwrap();
         let postfix = topostfix(tokens).unwrap();

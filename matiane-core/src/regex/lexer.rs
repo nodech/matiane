@@ -117,7 +117,12 @@ fn insert_maybe_concat(tokens: &mut TokenStream, token: Token) {
 fn insert_concat_after(token: Token) -> bool {
     matches!(
         token,
-        Token::Char(_) | Token::RParen | Token::Dot | Token::Star | Token::Plus
+        Token::Char(_)
+            | Token::RParen
+            | Token::Dot
+            | Token::Star
+            | Token::Plus
+            | Token::Question
     )
 }
 
@@ -127,7 +132,7 @@ fn insert_concat_before(token: Token) -> bool {
 
 fn precedence(token: Token) -> usize {
     match token {
-        Token::Star | Token::Plus => 3,
+        Token::Star | Token::Plus | Token::Question => 3,
         Token::Concat => 2,
         Token::Pipe => 1,
         _ => 0,
@@ -317,5 +322,25 @@ mod tests {
         let postfix = topostfix(parens);
 
         assert_eq!(postfix, Err(LexError::UnbalancedParens));
+    }
+
+    #[test]
+    fn test_topostfix_question() {
+        let tokens = tokenize("abc?d".chars()).unwrap();
+        let postfix = topostfix(tokens).unwrap();
+
+        assert_eq!(
+            postfix.tokens,
+            vec![
+                Char('a'),
+                Char('b'),
+                Concat,
+                Char('c'),
+                Question,
+                Concat,
+                Char('d'),
+                Concat,
+            ]
+        )
     }
 }
