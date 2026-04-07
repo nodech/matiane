@@ -85,7 +85,10 @@ impl CharacterClass {
         let mut merged: Vec<CharRange> = Vec::with_capacity(self.ranges.len());
 
         for item in &self.ranges {
-            if merged.last().is_none_or(|last| last.end < item.start) {
+            if merged
+                .last()
+                .is_none_or(|last| next_char(last.end) < item.start)
+            {
                 merged.push(*item);
             } else {
                 let last = merged.last_mut().unwrap();
@@ -350,6 +353,10 @@ pub(super) fn topostfix(
     })
 }
 
+fn next_char(c: char) -> char {
+    char::from_u32(c as u32 + 1).unwrap_or(c)
+}
+
 #[cfg(test)]
 mod tests {
     use super::Token::*;
@@ -552,7 +559,7 @@ mod tests {
 
         #[test]
         fn test_dedupes() {
-            let input = char_vec("aaab");
+            let input = char_vec("aaac");
             let parsed = CharacterClass::parse(&input, 0).unwrap();
 
             assert_eq!(
@@ -563,8 +570,8 @@ mod tests {
                         end: 'a'
                     },
                     CharRange {
-                        start: 'b',
-                        end: 'b'
+                        start: 'c',
+                        end: 'c'
                     },
                 ]
             );
@@ -648,6 +655,20 @@ mod tests {
                         end: 'a'
                     },
                 ]
+            );
+        }
+
+        #[test]
+        fn test_merge_adjacent() {
+            let input = char_vec("a-fgh-z");
+            let parsed = CharacterClass::parse(&input, 0).unwrap();
+
+            assert_eq!(
+                parsed.ranges,
+                vec![CharRange {
+                    start: 'a',
+                    end: 'z',
+                }]
             );
         }
     }
