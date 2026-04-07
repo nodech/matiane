@@ -231,76 +231,136 @@ mod tests {
     use super::Token::*;
     use super::*;
 
-    #[test]
-    fn test_simple_literals() {
-        assert_eq!(
-            tokenize("abcd".chars()).unwrap(),
-            vec![
-                Char('a'),
-                Concat,
-                Char('b'),
-                Concat,
-                Char('c'),
-                Concat,
-                Char('d')
-            ]
-        );
+    mod tokenize {
+        use super::*;
+
+        #[test]
+        fn test_simple_literals() {
+            assert_eq!(
+                tokenize("abcd".chars()).unwrap(),
+                vec![
+                    Char('a'),
+                    Concat,
+                    Char('b'),
+                    Concat,
+                    Char('c'),
+                    Concat,
+                    Char('d')
+                ]
+            );
+        }
+
+        #[test]
+        fn test_escape() {
+            assert_eq!(
+                tokenize("\\\\\\(".chars()).unwrap(),
+                vec![Char('\\'), Concat, Char('('),]
+            );
+
+            assert_eq!(
+                tokenize("ab \\".chars()),
+                Err(LexError::UnexpectedEof(4))
+            )
+        }
+
+        #[test]
+        fn test_several() {
+            assert_eq!(
+                tokenize("^ab*|d".chars()).unwrap(),
+                vec![
+                    Caret,
+                    Char('a'),
+                    Concat,
+                    Char('b'),
+                    Star,
+                    Pipe,
+                    Char('d')
+                ]
+            );
+        }
+
+        #[test]
+        fn test_question_token() {
+            assert_eq!(tokenize("a?".chars()), Ok(vec![Char('a'), Question]));
+        }
     }
 
-    #[test]
-    fn test_escape() {
-        assert_eq!(
-            tokenize("\\\\\\(".chars()).unwrap(),
-            vec![Char('\\'), Concat, Char('('),]
-        );
+    mod toposort {
+        use super::*;
 
-        assert_eq!(tokenize("ab \\".chars()), Err(LexError::UnexpectedEof(4)))
-    }
+        #[test]
+        fn test_without_parens() {
+            // a (+) b* | d*
+            // a b * (+) d |
+            let tokens = tokenize("ab*|d".chars()).unwrap();
+            let postfix = topostfix(tokens).unwrap();
+            assert_eq!(
+                postfix.tokens,
+                vec![Char('a'), Char('b'), Star, Concat, Char('d'), Pipe,]
+            );
 
-    #[test]
-    fn test_several() {
-        assert_eq!(
-            tokenize("^ab*|d".chars()).unwrap(),
-            vec![Caret, Char('a'), Concat, Char('b'), Star, Pipe, Char('d')]
-        );
-    }
+            // a (+) b * | d * (+) x +
+            // a b * (+) d * x + (+) |
+            let tokens = tokenize("ab*|d*x+".chars()).unwrap();
+            let postfix = topostfix(tokens).unwrap();
 
-    #[test]
-    fn test_question_token() {
-        assert_eq!(tokenize("a?".chars()), Ok(vec![Char('a'), Question]));
-    }
+            assert_eq!(
+                postfix.tokens,
+                vec![
+                    Char('a'),
+                    Char('b'),
+                    Star,
+                    Concat,
+                    Char('d'),
+                    Star,
+                    Char('x'),
+                    Plus,
+                    Concat,
+                    Pipe
+                ]
+            );
+        }
 
-    #[test]
-    fn test_topostfix_without_parens() {
-        // a (+) b* | d*
-        // a b * (+) d |
-        let tokens = tokenize("ab*|d".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
-        assert_eq!(
-            postfix.tokens,
-            vec![Char('a'), Char('b'), Star, Concat, Char('d'), Pipe,]
-        );
+        #[test]
+        fn test_with_parens() {
+            // a (+) (b* | c)
+            // a b * c | (+)
+            let tokens = tokenize("a(b*|c)".chars()).unwrap();
+            let postfix = topostfix(tokens).unwrap();
 
-        // a (+) b * | d * (+) x +
-        // a b * (+) d * x + (+) |
-        let tokens = tokenize("ab*|d*x+".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+            assert_eq!(
+                postfix.tokens,
+                vec![Char('a'), Char('b'), Star, Char('c'), Pipe, Concat,]
+            );
+        }
 
-        assert_eq!(
-            postfix.tokens,
-            vec![
-                Char('a'),
-                Char('b'),
-                Star,
-                Concat,
-                Char('d'),
-                Star,
-                Char('x'),
-                Plus,
-                Concat,
-                Pipe
-            ]
-        );
+        #[test]
+        fn test_bad_parens() {
+            let parens = tokenize("((".chars()).unwrap();
+            let postfix = topostfix(parens);
+
+            assert_eq!(postfix, Err(LexError::UnbalancedParens));
+        }
+
+        #[test]
+        fn test_question() {
+            let tokens = tokenize("abc?d".chars()).unwrap();
+            let postfix = topostfix(tokens).unwrap();
+
+            assert_eq!(
+                postfix.tokens,
+                vec![
+                    Char('a'),
+                    Char('b'),
+                    Concat,
+                    Char('c'),
+                    Question,
+                    Concat,
+                    Char('d'),
+                    Concat,
+                ]
+            )
+        }
     }
 
     #[test]
