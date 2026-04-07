@@ -246,15 +246,15 @@ impl NfaBuilder {
     }
 
     fn build_frags(&mut self, tokens: &PostfixTokens) -> ParseResult<()> {
-        for &el in tokens.iter() {
+        for el in tokens.iter() {
             match el {
-                Token::Char(ch) => self.match_char(ch)?,
+                Token::Char(ch) => self.match_char(*ch)?,
                 Token::Concat => self.concat()?,
                 Token::Pipe => self.pipe()?,
                 Token::Star => self.star()?,
                 Token::Plus => self.plus()?,
                 Token::Question => self.question()?,
-                _ => return Err(ParseError::UnsupportedToken(el)),
+                _ => return Err(ParseError::UnsupportedToken(el.clone())),
             }
         }
 

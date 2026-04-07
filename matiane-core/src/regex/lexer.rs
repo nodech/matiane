@@ -15,7 +15,7 @@ pub enum LexError {
     UnbalancedParens,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     Char(char),
     Dot,      // .
@@ -89,11 +89,11 @@ pub(super) fn tokenize(
             }
             '(' => Token::LParen,
             ')' => Token::RParen,
-            '.' => Token::Dot,
-            '?' => Token::Question,
             '|' => Token::Pipe,
+            '.' => Token::Dot,
             '*' => Token::Star,
             '+' => Token::Plus,
+            '?' => Token::Question,
             _ => Token::Char(ch),
         };
 
@@ -105,8 +105,8 @@ pub(super) fn tokenize(
 
 fn insert_maybe_concat(tokens: &mut TokenStream, token: Token) {
     if let Some(last) = tokens.last()
-        && insert_concat_after(*last)
-        && insert_concat_before(token)
+        && insert_concat_after(last)
+        && insert_concat_before(&token)
     {
         tokens.push(Token::Concat);
     }
@@ -114,7 +114,7 @@ fn insert_maybe_concat(tokens: &mut TokenStream, token: Token) {
     tokens.push(token);
 }
 
-fn insert_concat_after(token: Token) -> bool {
+fn insert_concat_after(token: &Token) -> bool {
     matches!(
         token,
         Token::Char(_)
@@ -126,11 +126,11 @@ fn insert_concat_after(token: Token) -> bool {
     )
 }
 
-fn insert_concat_before(token: Token) -> bool {
+fn insert_concat_before(token: &Token) -> bool {
     matches!(token, Token::Char(_) | Token::Dot | Token::LParen)
 }
 
-fn precedence(token: Token) -> usize {
+fn precedence(token: &Token) -> usize {
     match token {
         Token::Star | Token::Plus | Token::Question => 3,
         Token::Concat => 2,
@@ -177,7 +177,7 @@ pub(super) fn topostfix(
             continue;
         }
 
-        let tok_prec = precedence(tok);
+        let tok_prec = precedence(&tok);
 
         if tok_prec == 0 {
             out.push(tok);
@@ -188,14 +188,14 @@ pub(super) fn topostfix(
             let last_op = ops.last();
 
             let last_op = match last_op {
-                Some(token) => *token,
+                Some(token) => token,
                 None => {
                     ops.push(tok);
                     break;
                 }
             };
 
-            if last_op == Token::LParen {
+            if *last_op == Token::LParen {
                 ops.push(tok);
                 break;
             }
