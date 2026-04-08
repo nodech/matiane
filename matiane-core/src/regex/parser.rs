@@ -374,13 +374,13 @@ impl NfaBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::super::lexer::{tokenize, topostfix};
+    use super::super::lexer::{to_postfix, tokenize};
     use super::*;
 
     #[test]
     fn test_single_char_a() {
         let tokens = tokenize("a".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = vec![
@@ -398,7 +398,7 @@ mod tests {
     #[test]
     fn test_simple_abc() {
         let tokens = tokenize("abc".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = vec![
@@ -424,7 +424,7 @@ mod tests {
     #[test]
     fn test_four_chars_abcd() {
         let tokens = tokenize("abcd".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = vec![
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn test_simple_ab_or_d() {
         let tokens = tokenize("ab|d".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = vec![
@@ -483,7 +483,7 @@ mod tests {
     #[test]
     fn test_ab_or_cd() {
         let tokens = tokenize("ab|cd".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = vec![
@@ -521,7 +521,7 @@ mod tests {
     #[test]
     fn test_aorc_withd_or_io() {
         let tokens = tokenize("(a|c)d|io".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = vec![
@@ -570,7 +570,7 @@ mod tests {
     #[test]
     fn test_aorb_concat_cord() {
         let tokens = tokenize("(a|b)(c|d)".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = vec![
@@ -608,7 +608,7 @@ mod tests {
     #[test]
     fn test_astar_bstar() {
         let tokens = tokenize("a*|b*".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = [
@@ -647,7 +647,7 @@ mod tests {
     #[test]
     fn test_aorbstar_bstar() {
         let tokens = tokenize("(a|b)*|b*".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = [
@@ -695,7 +695,7 @@ mod tests {
     #[test]
     fn test_aplus_bplus() {
         let tokens = tokenize("a+|b+".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = [
@@ -734,7 +734,7 @@ mod tests {
     #[test]
     fn test_bastar() {
         let tokens = tokenize("ba*".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = [
@@ -763,7 +763,7 @@ mod tests {
     #[test]
     fn test_baplus() {
         let tokens = tokenize("ba+".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = [
@@ -792,7 +792,7 @@ mod tests {
     #[test]
     fn test_optional_lit() {
         let tokens = tokenize("ba?".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = [
@@ -821,7 +821,7 @@ mod tests {
     #[test]
     fn test_optional_abcd() {
         let tokens = tokenize("abc?d".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
         let nfa = NfaBuilder::build(&postfix).unwrap();
 
         let expected = [
@@ -860,7 +860,7 @@ mod tests {
     #[test]
     fn test_empty_regex_is_rejected() {
         let tokens = tokenize("".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
 
         assert!(matches!(
             NfaBuilder::build(&postfix),
@@ -871,7 +871,7 @@ mod tests {
     #[test]
     fn test_dangling_pipe_is_rejected() {
         let tokens = tokenize("a|".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
 
         assert!(matches!(
             NfaBuilder::build(&postfix),
@@ -882,7 +882,7 @@ mod tests {
     #[test]
     fn test_leading_quantifier_is_rejected() {
         let tokens = tokenize("*a".chars()).unwrap();
-        let postfix = topostfix(tokens).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
 
         assert!(matches!(
             NfaBuilder::build(&postfix),

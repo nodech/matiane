@@ -15,8 +15,6 @@ pub enum LexError {
     #[error("Unbalance parens")]
     UnbalancedParens,
 
-    #[error("Incorrect char class.")]
-    IncorrectCharClass,
     #[error("Range out of order in character class at {0}.")]
     IncorrectCharClassRangeOrder(usize),
 }
@@ -27,18 +25,34 @@ pub struct CharRange {
     pub end: char,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+struct ClassAtom {
+    ch: char,
+    escaped: bool,
+}
+
 #[derive(Debug, Default, PartialEq, Clone)]
-pub struct CharacterClass {
+pub struct CharClass {
     pub ranges: Vec<CharRange>,
     pub negated: bool,
 }
 
-impl CharacterClass {
-    fn parse(chars: &[char], offset: usize) -> Result<Self, LexError> {
+impl CharClass {
+    fn negated(mut self) -> Self {
+        self.negated = !self.negated;
+        self
+    }
+
+    fn parse(chars: &[ClassAtom], offset: usize) -> Result<Self, LexError> {
         let mut char_class = Self::default();
         let mut i = 0;
 
-        if chars.first() == Some(&'^') {
+        if chars.first()
+            == Some(&ClassAtom {
+                ch: '^',
+                escaped: false,
+            })
+        {
             char_class.negated = true;
             i = 1;
         }
@@ -49,20 +63,30 @@ impl CharacterClass {
             let next2 = chars.get(i + 2);
 
             match (chr, next, next2) {
-                (start, Some('-'), Some(end)) => {
-                    if start > *end {
+                (
+                    start,
+                    Some(ClassAtom {
+                        ch: '-',
+                        escaped: false,
+                    }),
+                    Some(end),
+                ) => {
+                    if start.ch > end.ch {
                         return Err(LexError::IncorrectCharClassRangeOrder(
                             offset + i,
                         ));
                     }
 
-                    char_class.ranges.push(CharRange { start, end: *end });
+                    char_class.ranges.push(CharRange {
+                        start: start.ch,
+                        end: end.ch,
+                    });
                     i += 3;
                 }
                 _ => {
                     char_class.ranges.push(CharRange {
-                        start: chr,
-                        end: chr,
+                        start: chr.ch,
+                        end: chr.ch,
                     });
 
                     i += 1;
@@ -98,12 +122,118 @@ impl CharacterClass {
 
         self.ranges = merged;
     }
+
+    fn digits() -> Self {
+        CharClass {
+            ranges: vec![CharRange {
+                start: '0',
+                end: '9',
+            }],
+            negated: false,
+        }
+    }
+
+    fn word() -> Self {
+        CharClass {
+            ranges: vec![
+                CharRange {
+                    start: '0',
+                    end: '9',
+                },
+                CharRange {
+                    start: 'A',
+                    end: 'Z',
+                },
+                CharRange {
+                    start: '_',
+                    end: '_',
+                },
+                CharRange {
+                    start: 'a',
+                    end: 'z',
+                },
+            ],
+            negated: false,
+        }
+    }
+
+    fn space() -> Self {
+        CharClass {
+            ranges: vec![
+                CharRange {
+                    start: '\t',
+                    end: '\t',
+                },
+                CharRange {
+                    start: '\n',
+                    end: '\n',
+                },
+                CharRange {
+                    start: '\u{000B}',
+                    end: '\u{000B}',
+                },
+                CharRange {
+                    start: '\u{000C}',
+                    end: '\u{000C}',
+                },
+                CharRange {
+                    start: '\r',
+                    end: '\r',
+                },
+                CharRange {
+                    start: ' ',
+                    end: ' ',
+                },
+                CharRange {
+                    start: '\u{00A0}',
+                    end: '\u{00A0}',
+                },
+                CharRange {
+                    start: '\u{2028}',
+                    end: '\u{2028}',
+                },
+                CharRange {
+                    start: '\u{2029}',
+                    end: '\u{2029}',
+                },
+            ],
+            negated: false,
+        }
+    }
+
+    fn line_terminators() -> Self {
+        CharClass {
+            ranges: vec![
+                CharRange {
+                    start: '\n',
+                    end: '\n',
+                },
+                CharRange {
+                    start: '\r',
+                    end: '\r',
+                },
+                CharRange {
+                    start: '\u{2028}',
+                    end: '\u{2028}',
+                },
+                CharRange {
+                    start: '\u{2029}',
+                    end: '\u{2029}',
+                },
+            ],
+            negated: false,
+        }
+    }
+
+    fn dot() -> Self {
+        Self::line_terminators().negated()
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
+    Concat, // Pseudo element?
     Char(char),
-    Dot,      // .
     Question, // ?
     Star,     // *
     Plus,     // +
@@ -112,16 +242,9 @@ pub enum Token {
     Pipe,     // |
     LParen,   // (
     RParen,   // )
-    // LBracket, // [
-    // RBracket, // ]
-    // LBrace,   // {
-    // RBrace,   // }
-    // Dash,     // -
-    // Digits,  // \d
-    // Word,    // \w
-    // Space,   // \s
-    CharClass(CharacterClass),
-    Concat, // Pseudo element?
+    LBrace,   // {
+    RBrace,   // }
+    Class(CharClass),
 }
 
 type TokenStream = Vec<Token>;
@@ -142,15 +265,15 @@ impl PostfixTokens {
 fn parse_char_class(
     iter: &mut Peekable<impl Iterator<Item = char>>,
     offset: usize,
-) -> Result<(CharacterClass, usize), LexError> {
+) -> Result<(CharClass, usize), LexError> {
     let mut idx = 0;
-    let mut contents: Vec<char> = vec![];
+    let mut contents: Vec<ClassAtom> = vec![];
 
     while let Some(ch) = iter.next() {
-        idx += 1;
-
         match ch {
             '\\' => {
+                idx += 1;
+
                 let escaped = *iter
                     .peek()
                     .ok_or(LexError::UnexpectedEof(offset + idx))?;
@@ -158,14 +281,18 @@ fn parse_char_class(
                 iter.next();
                 idx += 1;
 
-                contents.push(escaped);
+                contents.push(ClassAtom {
+                    ch: escaped,
+                    escaped: true,
+                });
             }
             ']' => {
-                let chclass = CharacterClass::parse(&contents, offset)?;
-                return Ok((chclass, offset + idx));
+                let chclass = CharClass::parse(&contents, offset)?;
+                return Ok((chclass, offset + idx + 1));
             }
             _ => {
-                contents.push(ch);
+                idx += 1;
+                contents.push(ClassAtom { ch, escaped: false });
             }
         }
     }
@@ -203,7 +330,16 @@ pub(super) fn tokenize(
 
                 iter.next();
                 idx += 1;
-                Token::Char(escaped)
+
+                match escaped {
+                    'w' => Token::Class(CharClass::word()),
+                    'W' => Token::Class(CharClass::word().negated()),
+                    'd' => Token::Class(CharClass::digits()),
+                    'D' => Token::Class(CharClass::digits().negated()),
+                    's' => Token::Class(CharClass::space()),
+                    'S' => Token::Class(CharClass::space().negated()),
+                    _ => Token::Char(escaped),
+                }
             }
             '\n' | '\r' => {
                 continue;
@@ -211,7 +347,7 @@ pub(super) fn tokenize(
             '(' => Token::LParen,
             ')' => Token::RParen,
             '|' => Token::Pipe,
-            '.' => Token::Dot,
+            '.' => Token::Class(CharClass::dot()),
             '*' => Token::Star,
             '+' => Token::Plus,
             '?' => Token::Question,
@@ -219,7 +355,7 @@ pub(super) fn tokenize(
                 let (chclass, updated_idx) = parse_char_class(&mut iter, idx)?;
                 idx = updated_idx;
 
-                Token::CharClass(chclass)
+                Token::Class(chclass)
             }
             _ => Token::Char(ch),
         };
@@ -246,15 +382,15 @@ fn insert_concat_after(token: &Token) -> bool {
         token,
         Token::Char(_)
             | Token::RParen
-            | Token::Dot
             | Token::Star
             | Token::Plus
             | Token::Question
+            | Token::Class(_)
     )
 }
 
 fn insert_concat_before(token: &Token) -> bool {
-    matches!(token, Token::Char(_) | Token::Dot | Token::LParen)
+    matches!(token, Token::Char(_) | Token::LParen | Token::Class(_))
 }
 
 fn precedence(token: &Token) -> usize {
@@ -267,7 +403,7 @@ fn precedence(token: &Token) -> usize {
 }
 
 // Shunting
-pub(super) fn topostfix(
+pub(super) fn to_postfix(
     tokens: TokenStream,
 ) -> Result<PostfixTokens, LexError> {
     let mut ops: Vec<Token> = vec![];
@@ -416,7 +552,7 @@ mod tests {
         }
     }
 
-    mod toposort {
+    mod to_postfix {
         use super::*;
 
         #[test]
@@ -424,7 +560,7 @@ mod tests {
             // a (+) b* | d*
             // a b * (+) d |
             let tokens = tokenize("ab*|d".chars()).unwrap();
-            let postfix = topostfix(tokens).unwrap();
+            let postfix = to_postfix(tokens).unwrap();
             assert_eq!(
                 postfix.tokens,
                 vec![Char('a'), Char('b'), Star, Concat, Char('d'), Pipe,]
@@ -433,7 +569,7 @@ mod tests {
             // a (+) b * | d * (+) x +
             // a b * (+) d * x + (+) |
             let tokens = tokenize("ab*|d*x+".chars()).unwrap();
-            let postfix = topostfix(tokens).unwrap();
+            let postfix = to_postfix(tokens).unwrap();
 
             assert_eq!(
                 postfix.tokens,
@@ -457,7 +593,7 @@ mod tests {
             // a (+) (b* | c)
             // a b * c | (+)
             let tokens = tokenize("a(b*|c)".chars()).unwrap();
-            let postfix = topostfix(tokens).unwrap();
+            let postfix = to_postfix(tokens).unwrap();
 
             assert_eq!(
                 postfix.tokens,
@@ -468,7 +604,7 @@ mod tests {
         #[test]
         fn test_bad_parens() {
             let parens = tokenize("((".chars()).unwrap();
-            let postfix = topostfix(parens);
+            let postfix = to_postfix(parens);
 
             assert_eq!(postfix, Err(LexError::UnbalancedParens));
         }
@@ -476,7 +612,7 @@ mod tests {
         #[test]
         fn test_question() {
             let tokens = tokenize("abc?d".chars()).unwrap();
-            let postfix = topostfix(tokens).unwrap();
+            let postfix = to_postfix(tokens).unwrap();
 
             assert_eq!(
                 postfix.tokens,
@@ -492,19 +628,117 @@ mod tests {
                 ]
             )
         }
+
+        #[test]
+        fn test_char_class() {
+            let tokens = tokenize("a[b-fg-y]?z".chars()).unwrap();
+            let postfix = to_postfix(tokens).unwrap();
+
+            assert_eq!(
+                postfix.tokens,
+                vec![
+                    Char('a'),
+                    Class(CharClass {
+                        ranges: vec![CharRange {
+                            start: 'b',
+                            end: 'y',
+                        },],
+                        negated: false,
+                    }),
+                    Question,
+                    Concat,
+                    Char('z'),
+                    Concat,
+                ]
+            );
+        }
+
+        #[test]
+        fn test_char_class_dot() {
+            let tokens = tokenize("a.?z".chars()).unwrap();
+            let postfix = to_postfix(tokens).unwrap();
+
+            assert_eq!(
+                postfix.tokens,
+                vec![
+                    Char('a'),
+                    Class(CharClass::dot()),
+                    Question,
+                    Concat,
+                    Char('z'),
+                    Concat,
+                ]
+            );
+        }
+
+        #[test]
+        fn test_char_class_escapes() {
+            let tokens = tokenize("\\s\\S\\w\\W\\d\\D".chars()).unwrap();
+            let postfix = to_postfix(tokens).unwrap();
+
+            assert_eq!(
+                postfix.tokens,
+                vec![
+                    Class(CharClass::space()),
+                    Class(CharClass::space().negated()),
+                    Concat,
+                    Class(CharClass::word()),
+                    Concat,
+                    Class(CharClass::word().negated()),
+                    Concat,
+                    Class(CharClass::digits()),
+                    Concat,
+                    Class(CharClass::digits().negated()),
+                    Concat,
+                ]
+            );
+        }
+
+        #[test]
+        fn test_unterminated_escape() {
+            let err = tokenize("[\\".chars()).unwrap_err();
+            assert_eq!(err, LexError::UnexpectedEof(2));
+
+            let err = tokenize("[a\\".chars()).unwrap_err();
+            assert_eq!(err, LexError::UnexpectedEof(3));
+
+            let err = tokenize("a[b\\".chars()).unwrap_err();
+            assert_eq!(err, LexError::UnexpectedEof(4));
+        }
     }
 
     mod character_class {
         use super::*;
 
-        fn char_vec(s: &str) -> Vec<char> {
-            s.chars().collect()
+        fn char_vec(s: &str) -> Vec<ClassAtom> {
+            let mut content: Vec<ClassAtom> = vec![];
+            let mut iter = s.chars().peekable();
+
+            while let Some(ch) = iter.next() {
+                match ch {
+                    '\\' => {
+                        let escaped = *iter.peek().unwrap();
+
+                        iter.next();
+
+                        content.push(ClassAtom {
+                            ch: escaped,
+                            escaped: true,
+                        });
+                    }
+                    _ => {
+                        content.push(ClassAtom { ch, escaped: false });
+                    }
+                }
+            }
+
+            content
         }
 
         #[test]
         fn test_basic() {
             let input = char_vec("0-9ka-zA-Z%");
-            let parsed = CharacterClass::parse(&input, 0).unwrap();
+            let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
                 parsed.ranges,
@@ -532,7 +766,7 @@ mod tests {
         #[test]
         fn test_single_chars() {
             let input = char_vec("kza%");
-            let parsed = CharacterClass::parse(&input, 0).unwrap();
+            let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
                 parsed.ranges,
@@ -560,7 +794,7 @@ mod tests {
         #[test]
         fn test_dedupes() {
             let input = char_vec("aaac");
-            let parsed = CharacterClass::parse(&input, 0).unwrap();
+            let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
                 parsed.ranges,
@@ -580,7 +814,7 @@ mod tests {
         #[test]
         fn test_merges_overlapping_ranges() {
             let input = char_vec("a-fd-z");
-            let parsed = CharacterClass::parse(&input, 0).unwrap();
+            let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
                 parsed.ranges,
@@ -594,7 +828,7 @@ mod tests {
         #[test]
         fn test_range_order_error() {
             let input = char_vec("z-a");
-            let err = CharacterClass::parse(&input, 7).unwrap_err();
+            let err = CharClass::parse(&input, 7).unwrap_err();
 
             assert_eq!(err, LexError::IncorrectCharClassRangeOrder(7));
         }
@@ -602,7 +836,7 @@ mod tests {
         #[test]
         fn test_negated() {
             let input = char_vec("^a-z");
-            let parsed = CharacterClass::parse(&input, 0).unwrap();
+            let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert!(parsed.negated);
             assert_eq!(
@@ -617,7 +851,7 @@ mod tests {
         #[test]
         fn test_dash_literal_at_start() {
             let input = char_vec("-a^");
-            let parsed = CharacterClass::parse(&input, 0).unwrap();
+            let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
                 parsed.ranges,
@@ -641,7 +875,7 @@ mod tests {
         #[test]
         fn test_dash_literal_at_end() {
             let input = char_vec("a-");
-            let parsed = CharacterClass::parse(&input, 0).unwrap();
+            let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
                 parsed.ranges,
@@ -661,13 +895,107 @@ mod tests {
         #[test]
         fn test_merge_adjacent() {
             let input = char_vec("a-fgh-z");
-            let parsed = CharacterClass::parse(&input, 0).unwrap();
+            let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
                 parsed.ranges,
                 vec![CharRange {
                     start: 'a',
                     end: 'z',
+                }]
+            );
+        }
+
+        #[test]
+        fn test_merge_numbers() {
+            let input = char_vec("0-9");
+            let parsed = CharClass::parse(&input, 0).unwrap();
+
+            assert_eq!(
+                parsed.ranges,
+                vec![CharRange {
+                    start: '0',
+                    end: '9',
+                }]
+            );
+        }
+
+        #[test]
+        fn test_merge_word() {
+            let input = char_vec("0-9a-zA-Z_");
+            let parsed = CharClass::parse(&input, 0).unwrap();
+
+            assert_eq!(
+                parsed.ranges,
+                vec![
+                    CharRange {
+                        start: '0',
+                        end: '9',
+                    },
+                    CharRange {
+                        start: 'A',
+                        end: 'Z',
+                    },
+                    CharRange {
+                        start: '_',
+                        end: '_',
+                    },
+                    CharRange {
+                        start: 'a',
+                        end: 'z',
+                    },
+                ]
+            );
+        }
+
+        #[test]
+        fn test_escaped_dash() {
+            let input = char_vec("0\\-9");
+            let parsed = CharClass::parse(&input, 0).unwrap();
+
+            assert_eq!(
+                parsed.ranges,
+                vec![
+                    CharRange {
+                        start: '-',
+                        end: '-',
+                    },
+                    CharRange {
+                        start: '0',
+                        end: '0',
+                    },
+                    CharRange {
+                        start: '9',
+                        end: '9',
+                    },
+                ]
+            );
+        }
+
+        #[test]
+        fn test_escaped_negate() {
+            let input = char_vec("\\^");
+            let parsed = CharClass::parse(&input, 0).unwrap();
+
+            assert_eq!(
+                parsed.ranges,
+                vec![CharRange {
+                    start: '^',
+                    end: '^'
+                }]
+            );
+        }
+
+        #[test]
+        fn test_escaped_endbracket() {
+            let input = char_vec("A-\\]");
+            let parsed = CharClass::parse(&input, 0).unwrap();
+
+            assert_eq!(
+                parsed.ranges,
+                vec![CharRange {
+                    start: 'A',
+                    end: ']'
                 }]
             );
         }
