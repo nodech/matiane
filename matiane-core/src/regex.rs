@@ -21,7 +21,7 @@ impl<'a> Regex<'a> {
     pub fn compile(raw_regex: &'a str) -> Result<Self, RegexCompileError> {
         let tokens = lexer::tokenize(raw_regex.chars())?;
         let postfix_tokens = lexer::to_postfix(tokens)?;
-        let nfa = parser::NfaBuilder::build(&postfix_tokens)?;
+        let nfa = parser::NfaBuilder::build(postfix_tokens)?;
 
         Ok(Self {
             src: raw_regex,

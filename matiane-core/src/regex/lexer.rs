@@ -38,6 +38,25 @@ pub struct CharClass {
 }
 
 impl CharClass {
+    pub fn matches(&self, ch: char) -> bool {
+        // O(N) for now, maybe O(log N) later.
+        for range in &self.ranges {
+            if range.start > ch {
+                continue;
+            }
+
+            if range.start <= ch && range.end >= ch {
+                return true;
+            }
+
+            if range.start > ch {
+                break;
+            }
+        }
+
+        false
+    }
+
     fn negated(mut self) -> Self {
         self.negated = !self.negated;
         self
@@ -259,6 +278,10 @@ pub(super) struct PostfixTokens {
 impl PostfixTokens {
     pub fn iter(&self) -> std::slice::Iter<'_, Token> {
         self.tokens.iter()
+    }
+
+    pub fn into_iter(self) -> std::vec::IntoIter<Token> {
+        self.tokens.into_iter()
     }
 }
 
@@ -710,7 +733,7 @@ mod tests {
     mod character_class {
         use super::*;
 
-        fn char_vec(s: &str) -> Vec<ClassAtom> {
+        fn atom_vec(s: &str) -> Vec<ClassAtom> {
             let mut content: Vec<ClassAtom> = vec![];
             let mut iter = s.chars().peekable();
 
@@ -735,9 +758,31 @@ mod tests {
             content
         }
 
+        fn char_vec(s: &str) -> Vec<char> {
+            s.chars().collect()
+        }
+
+        #[track_caller]
+        fn assert_all_match(chclass: &CharClass, arr: &[char]) {
+            for ch in arr {
+                assert!(chclass.matches(*ch), r#"Regex must contain "{}""#, ch);
+            }
+        }
+
+        #[track_caller]
+        fn assert_none_match(chclass: &CharClass, arr: &[char]) {
+            for ch in arr {
+                assert!(
+                    !chclass.matches(*ch),
+                    r#"Regex must not contain "{}""#,
+                    ch
+                );
+            }
+        }
+
         #[test]
         fn test_basic() {
-            let input = char_vec("0-9ka-zA-Z%");
+            let input = atom_vec("0-9ka-zA-Z%");
             let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
@@ -760,12 +805,24 @@ mod tests {
                         end: 'z',
                     },
                 ]
-            )
+            );
+
+            assert_all_match(
+                &parsed,
+                &char_vec(concat!(
+                    "0123456789",
+                    "abcdefghijklmnopqrstuvwxyz",
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "%",
+                )),
+            );
+
+            assert_none_match(&parsed, &char_vec("!@#$^&*)_ \n\r"));
         }
 
         #[test]
         fn test_single_chars() {
-            let input = char_vec("kza%");
+            let input = atom_vec("kza%");
             let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
@@ -793,7 +850,7 @@ mod tests {
 
         #[test]
         fn test_dedupes() {
-            let input = char_vec("aaac");
+            let input = atom_vec("aaac");
             let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
@@ -813,7 +870,7 @@ mod tests {
 
         #[test]
         fn test_merges_overlapping_ranges() {
-            let input = char_vec("a-fd-z");
+            let input = atom_vec("a-fd-z");
             let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
@@ -827,7 +884,7 @@ mod tests {
 
         #[test]
         fn test_range_order_error() {
-            let input = char_vec("z-a");
+            let input = atom_vec("z-a");
             let err = CharClass::parse(&input, 7).unwrap_err();
 
             assert_eq!(err, LexError::IncorrectCharClassRangeOrder(7));
@@ -835,7 +892,7 @@ mod tests {
 
         #[test]
         fn test_negated() {
-            let input = char_vec("^a-z");
+            let input = atom_vec("^a-z");
             let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert!(parsed.negated);
@@ -850,7 +907,7 @@ mod tests {
 
         #[test]
         fn test_dash_literal_at_start() {
-            let input = char_vec("-a^");
+            let input = atom_vec("-a^");
             let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
@@ -874,7 +931,7 @@ mod tests {
 
         #[test]
         fn test_dash_literal_at_end() {
-            let input = char_vec("a-");
+            let input = atom_vec("a-");
             let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
@@ -894,7 +951,7 @@ mod tests {
 
         #[test]
         fn test_merge_adjacent() {
-            let input = char_vec("a-fgh-z");
+            let input = atom_vec("a-fgh-z");
             let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
@@ -908,7 +965,7 @@ mod tests {
 
         #[test]
         fn test_merge_numbers() {
-            let input = char_vec("0-9");
+            let input = atom_vec("0-9");
             let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
@@ -922,7 +979,7 @@ mod tests {
 
         #[test]
         fn test_merge_word() {
-            let input = char_vec("0-9a-zA-Z_");
+            let input = atom_vec("0-9a-zA-Z_");
             let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
@@ -950,7 +1007,7 @@ mod tests {
 
         #[test]
         fn test_escaped_dash() {
-            let input = char_vec("0\\-9");
+            let input = atom_vec("0\\-9");
             let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
@@ -974,7 +1031,7 @@ mod tests {
 
         #[test]
         fn test_escaped_negate() {
-            let input = char_vec("\\^");
+            let input = atom_vec("\\^");
             let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(
@@ -988,7 +1045,7 @@ mod tests {
 
         #[test]
         fn test_escaped_endbracket() {
-            let input = char_vec("A-\\]");
+            let input = atom_vec("A-\\]");
             let parsed = CharClass::parse(&input, 0).unwrap();
 
             assert_eq!(

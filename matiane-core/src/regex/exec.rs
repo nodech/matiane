@@ -30,6 +30,11 @@ impl<'a> ExecRegex<'a> {
                             next_states.push(*next);
                         }
                     }
+                    NfaState::MatchClass { class, next } => {
+                        if class.matches(ch) {
+                            next_states.push(*next);
+                        }
+                    }
                     NfaState::Split { out1, out2 } => {
                         states.push(*out1);
                         states.push(*out2);
@@ -52,6 +57,7 @@ impl<'a> ExecRegex<'a> {
 
             match state {
                 NfaState::Match { .. } => continue,
+                NfaState::MatchClass { .. } => continue,
                 NfaState::Split { out1, out2 } => {
                     states.push(*out1);
                     states.push(*out2);
@@ -196,5 +202,13 @@ mod tests {
 
         assert_all_matches!(regex, ["abcd", "abd", "aaabd", "----abcd------"]);
         assert_none_matches!(regex, ["acd", "aaa", "bbbbbbbbb"]);
+    }
+
+    #[test]
+    fn test_is_match_range() {
+        let regex = Regex::compile("[a-z]").unwrap();
+
+        assert_all_matches!(regex, ["a", "b", "g", "z"]);
+        assert_none_matches!(regex, ["0", "@@", "1"]);
     }
 }

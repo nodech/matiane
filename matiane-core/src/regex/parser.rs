@@ -1,6 +1,4 @@
-use super::lexer::PostfixTokens;
-use super::lexer::Token;
-use std::collections::HashSet;
+use super::lexer::{CharClass, PostfixTokens, Token};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
@@ -33,6 +31,10 @@ enum FragmentState {
         symbol: char,
         next: Option<StateId>,
     },
+    MatchClass {
+        class: CharClass,
+        next: Option<StateId>,
+    },
     Finish,
 }
 
@@ -40,6 +42,7 @@ enum FragmentState {
 pub(super) enum NfaState {
     Split { out1: StateId, out2: StateId },
     Match { symbol: char, next: StateId },
+    MatchClass { class: CharClass, next: StateId },
     Finish,
 }
 
@@ -124,6 +127,9 @@ impl NfaBuilder {
                 FragmentState::Match { next, .. } => {
                     *next = Some(s);
                 }
+                FragmentState::MatchClass { next, .. } => {
+                    *next = Some(s);
+                }
                 FragmentState::Split { out1, out2 } => {
                     if out1.is_none() {
                         *out1 = Some(s);
@@ -141,6 +147,17 @@ impl NfaBuilder {
             symbol: ch,
             next: None,
         });
+
+        self.push(Fragment {
+            start: s,
+            outs: vec![s],
+        });
+
+        Ok(())
+    }
+
+    fn match_class(&mut self, class: CharClass) -> ParseResult<()> {
+        let s = self.state(FragmentState::MatchClass { class, next: None });
 
         self.push(Fragment {
             start: s,
@@ -253,6 +270,12 @@ impl NfaBuilder {
                         symbol,
                         next: next.ok_or(ParseError::MalformedRegex)?,
                     },
+                    FragmentState::MatchClass { class, next } => {
+                        NfaState::MatchClass {
+                            class,
+                            next: next.ok_or(ParseError::MalformedRegex)?,
+                        }
+                    }
                     FragmentState::Split { out1, out2 } => NfaState::Split {
                         out1: out1.ok_or(ParseError::MalformedRegex)?,
                         out2: out2.ok_or(ParseError::MalformedRegex)?,
@@ -270,15 +293,16 @@ impl NfaBuilder {
         })
     }
 
-    fn build_frags(&mut self, tokens: &PostfixTokens) -> ParseResult<()> {
-        for el in tokens.iter() {
+    fn build_frags(&mut self, tokens: PostfixTokens) -> ParseResult<()> {
+        for el in tokens.into_iter() {
             match el {
-                Token::Char(ch) => self.match_char(*ch)?,
+                Token::Char(ch) => self.match_char(ch)?,
                 Token::Concat => self.concat()?,
                 Token::Pipe => self.pipe()?,
                 Token::Star => self.star()?,
                 Token::Plus => self.plus()?,
                 Token::Question => self.question()?,
+                Token::Class(class) => self.match_class(class)?,
                 _ => return Err(ParseError::UnsupportedToken(el.clone())),
             }
         }
@@ -294,7 +318,7 @@ impl NfaBuilder {
         self.finish()
     }
 
-    pub(super) fn build(tokens: &PostfixTokens) -> ParseResult<Nfa> {
+    pub(super) fn build(tokens: PostfixTokens) -> ParseResult<Nfa> {
         let mut builder = NfaBuilder {
             states: vec![],
             stack: vec![],
@@ -309,6 +333,8 @@ impl NfaBuilder {
 
 #[cfg(test)]
 mod tests {
+    use crate::regex::lexer::CharRange;
+
     use super::super::lexer::{to_postfix, tokenize};
     use super::*;
 
@@ -316,7 +342,7 @@ mod tests {
     fn test_single_char_a() {
         let tokens = tokenize("a".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
-        let nfa = NfaBuilder::build(&postfix).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = vec![
             NfaState::Match {
@@ -334,7 +360,7 @@ mod tests {
     fn test_simple_abc() {
         let tokens = tokenize("abc".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
-        let nfa = NfaBuilder::build(&postfix).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = vec![
             NfaState::Match {
@@ -360,7 +386,7 @@ mod tests {
     fn test_four_chars_abcd() {
         let tokens = tokenize("abcd".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
-        let nfa = NfaBuilder::build(&postfix).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = vec![
             NfaState::Match {
@@ -389,7 +415,7 @@ mod tests {
     fn test_simple_ab_or_d() {
         let tokens = tokenize("ab|d".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
-        let nfa = NfaBuilder::build(&postfix).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = vec![
             NfaState::Match {
@@ -419,7 +445,7 @@ mod tests {
     fn test_ab_or_cd() {
         let tokens = tokenize("ab|cd".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
-        let nfa = NfaBuilder::build(&postfix).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = vec![
             NfaState::Match {
@@ -457,7 +483,7 @@ mod tests {
     fn test_aorc_withd_or_io() {
         let tokens = tokenize("(a|c)d|io".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
-        let nfa = NfaBuilder::build(&postfix).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = vec![
             NfaState::Match {
@@ -506,7 +532,7 @@ mod tests {
     fn test_aorb_concat_cord() {
         let tokens = tokenize("(a|b)(c|d)".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
-        let nfa = NfaBuilder::build(&postfix).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = vec![
             NfaState::Match {
@@ -544,7 +570,7 @@ mod tests {
     fn test_astar_bstar() {
         let tokens = tokenize("a*|b*".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
-        let nfa = NfaBuilder::build(&postfix).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = [
             NfaState::Match {
@@ -583,7 +609,7 @@ mod tests {
     fn test_aorbstar_bstar() {
         let tokens = tokenize("(a|b)*|b*".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
-        let nfa = NfaBuilder::build(&postfix).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = [
             NfaState::Match {
@@ -631,7 +657,7 @@ mod tests {
     fn test_aplus_bplus() {
         let tokens = tokenize("a+|b+".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
-        let nfa = NfaBuilder::build(&postfix).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = [
             NfaState::Match {
@@ -670,7 +696,7 @@ mod tests {
     fn test_bastar() {
         let tokens = tokenize("ba*".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
-        let nfa = NfaBuilder::build(&postfix).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = [
             NfaState::Match {
@@ -699,7 +725,7 @@ mod tests {
     fn test_baplus() {
         let tokens = tokenize("ba+".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
-        let nfa = NfaBuilder::build(&postfix).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = [
             NfaState::Match {
@@ -728,7 +754,7 @@ mod tests {
     fn test_optional_lit() {
         let tokens = tokenize("ba?".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
-        let nfa = NfaBuilder::build(&postfix).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = [
             NfaState::Match {
@@ -757,7 +783,7 @@ mod tests {
     fn test_optional_abcd() {
         let tokens = tokenize("abc?d".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
-        let nfa = NfaBuilder::build(&postfix).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = [
             NfaState::Match {
@@ -797,7 +823,7 @@ mod tests {
         let tokens = tokenize("".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
 
-        let out = NfaBuilder::build(&postfix);
+        let out = NfaBuilder::build(postfix);
         assert!(matches!(out, Err(ParseError::EmptyRegex)));
     }
 
@@ -807,7 +833,7 @@ mod tests {
         let postfix = to_postfix(tokens).unwrap();
 
         assert!(matches!(
-            NfaBuilder::build(&postfix),
+            NfaBuilder::build(postfix),
             Err(ParseError::MalformedRegex)
         ));
     }
@@ -818,8 +844,70 @@ mod tests {
         let postfix = to_postfix(tokens).unwrap();
 
         assert!(matches!(
-            NfaBuilder::build(&postfix),
+            NfaBuilder::build(postfix),
             Err(ParseError::MalformedRegex)
         ));
+    }
+
+    #[test]
+    fn test_simple_group() {
+        let tokens = tokenize("[ab]".chars()).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
+
+        let expected = vec![
+            NfaState::MatchClass {
+                class: CharClass {
+                    ranges: vec![CharRange {
+                        start: 'a',
+                        end: 'b',
+                    }],
+                    negated: false,
+                },
+                next: StateId(1),
+            },
+            NfaState::Finish,
+        ];
+
+        assert_eq!(nfa.states, expected);
+        assert_eq!(nfa.entry, StateId(0));
+    }
+
+    #[test]
+    fn test_simple_alt_groups() {
+        let tokens = tokenize("[a-f]|[^g-z]".chars()).unwrap();
+        let postfix = to_postfix(tokens).unwrap();
+        let nfa = NfaBuilder::build(postfix).unwrap();
+
+        let expected = vec![
+            NfaState::MatchClass {
+                class: CharClass {
+                    ranges: vec![CharRange {
+                        start: 'a',
+                        end: 'f',
+                    }],
+                    negated: false,
+                },
+                next: StateId(3),
+            }, // 0
+            NfaState::MatchClass {
+                class: CharClass {
+                    ranges: vec![CharRange {
+                        start: 'g',
+                        end: 'z',
+                    }],
+                    negated: true,
+                },
+                next: StateId(3),
+            }, // 1
+            NfaState::Split {
+                out1: StateId(0),
+                out2: StateId(1),
+            }, // 2
+            NfaState::Finish, // 3
+        ];
+
+        assert_eq!(nfa.states, expected);
+        assert_eq!(nfa.entry, StateId(2));
     }
 }
