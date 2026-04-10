@@ -23,12 +23,24 @@ pub type ParseResult<T> = Result<T, ParseError>;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct StateId(usize);
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
+enum FragmentState {
+    Split {
+        out1: Option<StateId>,
+        out2: Option<StateId>,
+    },
+    Match {
+        symbol: char,
+        next: Option<StateId>,
+    },
+    Finish,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(super) enum NfaState {
     Split { out1: StateId, out2: StateId },
     Match { symbol: char, next: StateId },
     Finish,
-    None,
 }
 
 #[derive(Debug)]
@@ -62,22 +74,10 @@ impl From<FragmentId> for StateId {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum FragmentState {
-    Match { symbol: char },
-    Finish,
-    Split { out1: FragmentId, out2: FragmentId },
-    OptRepeat { out1: FragmentId },
-    Optional { out1: FragmentId },
-}
-
 #[derive(Debug)]
 struct Fragment {
-    id: FragmentId,
-    state: FragmentState,
-    first: FragmentId,
-    last: FragmentId,
-    next: Option<FragmentId>,
+    start: StateId,
+    outs: Vec<StateId>,
 }
 
 impl std::ops::Index<FragmentId> for Vec<Fragment> {
@@ -96,58 +96,70 @@ impl std::ops::IndexMut<FragmentId> for Vec<Fragment> {
 
 #[derive(Debug)]
 pub struct NfaBuilder {
+    states: Vec<FragmentState>,
+    stack: Vec<Fragment>,
     match_start: bool,
     match_end: bool,
-    items: Vec<Fragment>,
-    stack: Vec<FragmentId>,
 }
 
 impl NfaBuilder {
-    fn next_frag_id(&self) -> FragmentId {
-        FragmentId(self.items.len())
+    fn state(&mut self, s: FragmentState) -> StateId {
+        self.states.push(s);
+        StateId(self.states.len() - 1)
     }
 
-    fn push_fragment(&mut self, frag: Fragment) {
-        assert!(frag.id == self.next_frag_id());
-        self.stack.push(frag.id);
-        self.items.push(frag);
+    fn push(&mut self, frag: Fragment) {
+        self.stack.push(frag);
     }
 
-    fn push(&mut self, id: FragmentId) {
-        self.stack.push(id);
-    }
-
-    fn pop(&mut self) -> ParseResult<FragmentId> {
+    fn pop(&mut self) -> ParseResult<Fragment> {
         self.stack.pop().ok_or(ParseError::MalformedRegex)
     }
 
-    fn match_char(&mut self, ch: char) -> ParseResult<()> {
-        let frag_id = self.next_frag_id();
-        let fragment = Fragment {
-            id: frag_id,
-            state: FragmentState::Match { symbol: ch },
-            first: frag_id,
-            last: frag_id,
-            next: None,
-        };
+    fn patch(&mut self, outs: Vec<StateId>, s: StateId) {
+        for out in outs {
+            let state = &mut self.states[out.0];
 
-        self.push_fragment(fragment);
+            match state {
+                FragmentState::Match { next, .. } => {
+                    *next = Some(s);
+                }
+                FragmentState::Split { out1, out2 } => {
+                    if out1.is_none() {
+                        *out1 = Some(s);
+                    } else {
+                        *out2 = Some(s);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn match_char(&mut self, ch: char) -> ParseResult<()> {
+        let s = self.state(FragmentState::Match {
+            symbol: ch,
+            next: None,
+        });
+
+        self.push(Fragment {
+            start: s,
+            outs: vec![s],
+        });
 
         Ok(())
     }
 
     fn concat(&mut self) -> ParseResult<()> {
-        let right = self.pop()?;
-        let left = self.pop()?;
+        let e2 = self.pop()?;
+        let e1 = self.pop()?;
 
-        // We continue chain from the last.
-        let left_last = self.items[left].last;
-        self.items[left_last].next = Some(right);
+        self.patch(e1.outs, e2.start);
 
-        // Update the first items (left) last.
-        self.items[left].last = self.items[right].last;
-
-        self.push(left);
+        self.push(Fragment {
+            start: e1.start,
+            outs: e2.outs,
+        });
 
         Ok(())
     }
@@ -156,19 +168,15 @@ impl NfaBuilder {
         let right = self.pop()?;
         let left = self.pop()?;
 
-        let frag_id = self.next_frag_id();
-        let fragment = Fragment {
-            id: frag_id,
-            state: FragmentState::Split {
-                out1: self.items[left].first,
-                out2: self.items[right].first,
-            },
-            first: frag_id,
-            last: frag_id,
-            next: None,
-        };
+        let s = self.state(FragmentState::Split {
+            out1: Some(left.start),
+            out2: Some(right.start),
+        });
 
-        self.push_fragment(fragment);
+        let mut outs = left.outs;
+        outs.extend(right.outs);
+
+        self.push(Fragment { start: s, outs });
 
         Ok(())
     }
@@ -176,16 +184,17 @@ impl NfaBuilder {
     fn star(&mut self) -> ParseResult<()> {
         let last = self.pop()?;
 
-        let frag_id = self.next_frag_id();
-        let fragment = Fragment {
-            id: frag_id,
-            state: FragmentState::OptRepeat { out1: last },
-            first: frag_id,
-            last: frag_id,
-            next: None,
-        };
+        let s = self.state(FragmentState::Split {
+            out1: Some(last.start),
+            out2: None,
+        });
 
-        self.push_fragment(fragment);
+        self.patch(last.outs, s);
+
+        self.push(Fragment {
+            start: s,
+            outs: vec![s],
+        });
 
         Ok(())
     }
@@ -193,18 +202,17 @@ impl NfaBuilder {
     fn plus(&mut self) -> ParseResult<()> {
         let last = self.pop()?;
 
-        let frag_id = self.next_frag_id();
-        let fragment = Fragment {
-            id: frag_id,
-            state: FragmentState::OptRepeat { out1: last },
-            first: frag_id,
-            last: frag_id,
-            next: None,
-        };
+        let s = self.state(FragmentState::Split {
+            out1: Some(last.start),
+            out2: None,
+        });
 
-        self.push(last);
-        self.push_fragment(fragment);
-        self.concat()?;
+        self.patch(last.outs, s);
+
+        self.push(Fragment {
+            start: last.start,
+            outs: vec![s],
+        });
 
         Ok(())
     }
@@ -212,37 +220,54 @@ impl NfaBuilder {
     fn question(&mut self) -> ParseResult<()> {
         let last = self.pop()?;
 
-        let frag_id = self.next_frag_id();
-        let fragment = Fragment {
-            id: frag_id,
-            state: FragmentState::Optional { out1: last },
-            first: frag_id,
-            last: frag_id,
-            next: None,
-        };
+        let s = self.state(FragmentState::Split {
+            out1: Some(last.start),
+            out2: None,
+        });
 
-        self.push_fragment(fragment);
+        let mut outs = last.outs;
+        outs.push(s);
+
+        self.push(Fragment { start: s, outs });
 
         Ok(())
     }
 
-    fn finish(&mut self) -> ParseResult<()> {
-        if self.stack.is_empty() {
-            return Err(ParseError::EmptyRegex);
-        }
+    fn finish(mut self) -> ParseResult<Nfa> {
+        let last = self.pop()?;
 
-        let frag_id = self.next_frag_id();
-        self.push_fragment(Fragment {
-            id: frag_id,
-            state: FragmentState::Finish,
-            first: frag_id,
-            last: frag_id,
-            next: None,
+        let s = self.state(FragmentState::Finish);
+        self.patch(last.outs, s);
+
+        self.push(Fragment {
+            start: last.start,
+            outs: vec![],
         });
 
-        self.concat()?;
+        let final_states: Result<Vec<NfaState>, ParseError> = self
+            .states
+            .into_iter()
+            .map(|fs| {
+                Ok(match fs {
+                    FragmentState::Match { symbol, next } => NfaState::Match {
+                        symbol,
+                        next: next.ok_or(ParseError::MalformedRegex)?,
+                    },
+                    FragmentState::Split { out1, out2 } => NfaState::Split {
+                        out1: out1.ok_or(ParseError::MalformedRegex)?,
+                        out2: out2.ok_or(ParseError::MalformedRegex)?,
+                    },
+                    FragmentState::Finish => NfaState::Finish,
+                })
+            })
+            .collect();
 
-        Ok(())
+        Ok(Nfa {
+            match_start: self.match_start,
+            match_end: self.match_end,
+            states: final_states?,
+            entry: last.start,
+        })
     }
 
     fn build_frags(&mut self, tokens: &PostfixTokens) -> ParseResult<()> {
@@ -258,113 +283,23 @@ impl NfaBuilder {
             }
         }
 
-        self.finish()?;
-
         Ok(())
     }
 
-    fn build_nfa(&mut self) -> ParseResult<Nfa> {
-        let entry_id = self.pop()?;
-
-        let mut nfa = Nfa {
-            entry: self.items[entry_id].first.into(),
-            match_start: self.match_start,
-            match_end: self.match_end,
-            states: vec![NfaState::None; self.items.len()],
-        };
-
-        let mut fragments = vec![entry_id];
-        let mut visited = HashSet::<FragmentId>::new();
-
-        while let Some(frag_id) = fragments.pop() {
-            let Fragment { state, next, .. } = self.items[frag_id];
-
-            let state_id: StateId = frag_id.into();
-
-            if visited.contains(&frag_id) {
-                continue;
-            }
-
-            visited.insert(frag_id);
-
-            match state {
-                FragmentState::Match { symbol } => {
-                    let next = next.unwrap_or_else(|| {
-                        unreachable!(
-                            "Match fragment always has a next after finish"
-                        )
-                    });
-
-                    fragments.push(next);
-
-                    nfa.states[state_id] = NfaState::Match {
-                        symbol,
-                        next: next.into(),
-                    }
-                }
-                FragmentState::Split { out1, out2 } => {
-                    fragments.push(out1);
-                    fragments.push(out2);
-
-                    let last_out1 = self.items[out1].last;
-                    self.items[last_out1].next = next;
-                    let last_out2 = self.items[out2].last;
-                    self.items[last_out2].next = next;
-
-                    nfa.states[state_id] = NfaState::Split {
-                        out1: out1.into(),
-                        out2: out2.into(),
-                    }
-                }
-                FragmentState::OptRepeat { out1 } => {
-                    let next = next.unwrap_or_else(|| {
-                        unreachable!("OptRepeat must always have a next.")
-                    });
-
-                    fragments.push(out1);
-                    fragments.push(next);
-
-                    let last_out1 = self.items[out1].last;
-                    // Loop on itself.
-                    self.items[last_out1].next = Some(frag_id);
-
-                    nfa.states[state_id] = NfaState::Split {
-                        out1: out1.into(),
-                        out2: next.into(),
-                    }
-                }
-                FragmentState::Optional { out1 } => {
-                    let next = next.unwrap_or_else(|| {
-                        unreachable!("Optional must always have a next.")
-                    });
-
-                    fragments.push(out1);
-                    fragments.push(next);
-
-                    let last_out = self.items[out1].last;
-                    // Go to the next.
-                    self.items[last_out].next = Some(next);
-
-                    nfa.states[state_id] = NfaState::Split {
-                        out1: out1.into(),
-                        out2: next.into(),
-                    }
-                }
-                FragmentState::Finish => {
-                    nfa.states[state_id] = NfaState::Finish;
-                }
-            }
+    fn build_nfa(self) -> ParseResult<Nfa> {
+        if self.stack.is_empty() {
+            return Err(ParseError::EmptyRegex);
         }
 
-        Ok(nfa)
+        self.finish()
     }
 
     pub(super) fn build(tokens: &PostfixTokens) -> ParseResult<Nfa> {
         let mut builder = NfaBuilder {
+            states: vec![],
+            stack: vec![],
             match_start: tokens.match_start,
             match_end: tokens.match_end,
-            items: vec![],
-            stack: vec![],
         };
 
         builder.build_frags(tokens)?;
@@ -862,10 +797,8 @@ mod tests {
         let tokens = tokenize("".chars()).unwrap();
         let postfix = to_postfix(tokens).unwrap();
 
-        assert!(matches!(
-            NfaBuilder::build(&postfix),
-            Err(ParseError::EmptyRegex)
-        ));
+        let out = NfaBuilder::build(&postfix);
+        assert!(matches!(out, Err(ParseError::EmptyRegex)));
     }
 
     #[test]

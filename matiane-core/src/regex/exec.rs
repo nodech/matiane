@@ -22,24 +22,23 @@ impl<'a> ExecRegex<'a> {
             }
 
             while let Some(state_id) = states.pop() {
-                let state = self.nfa.states[state_id];
+                let state = &self.nfa.states[state_id];
 
                 match state {
                     NfaState::Match { symbol, next } => {
-                        if ch == symbol {
-                            next_states.push(next);
+                        if ch == *symbol {
+                            next_states.push(*next);
                         }
                     }
                     NfaState::Split { out1, out2 } => {
-                        states.push(out1);
-                        states.push(out2);
+                        states.push(*out1);
+                        states.push(*out2);
                     }
                     NfaState::Finish => {
                         if !self.nfa.match_end {
                             return true;
                         }
                     }
-                    NfaState::None => panic!("Unexpected state."),
                 }
             }
 
@@ -49,13 +48,13 @@ impl<'a> ExecRegex<'a> {
 
         // final check
         while let Some(state_id) = states.pop() {
-            let state = self.nfa.states[state_id];
+            let state = &self.nfa.states[state_id];
 
             match state {
                 NfaState::Match { .. } => continue,
                 NfaState::Split { out1, out2 } => {
-                    states.push(out1);
-                    states.push(out2);
+                    states.push(*out1);
+                    states.push(*out2);
                 }
                 NfaState::Finish => return true,
                 _ => panic!("Unexpected state."),
