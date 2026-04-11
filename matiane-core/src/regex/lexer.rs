@@ -46,7 +46,7 @@ impl CharClass {
             }
 
             if range.start <= ch && range.end >= ch {
-                return true;
+                return !self.negated;
             }
 
             if range.start > ch {
@@ -54,7 +54,7 @@ impl CharClass {
             }
         }
 
-        false
+        self.negated
     }
 
     fn negated(mut self) -> Self {

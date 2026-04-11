@@ -63,7 +63,6 @@ impl<'a> ExecRegex<'a> {
                     states.push(*out2);
                 }
                 NfaState::Finish => return true,
-                _ => panic!("Unexpected state."),
             }
         }
 
@@ -210,5 +209,60 @@ mod tests {
 
         assert_all_matches!(regex, ["a", "b", "g", "z"]);
         assert_none_matches!(regex, ["0", "@@", "1"]);
+    }
+
+    #[test]
+    fn test_is_match_last_opt_range() {
+        let regex = Regex::compile("^abc[0-9]?$").unwrap();
+
+        assert_all_matches!(
+            regex,
+            [
+                "abc0", "abc1", "abc2", "abc3", "abc4", "abc5", "abc6", "abc7",
+                "abc8", "abc9", "abc",
+            ]
+        );
+
+        assert_none_matches!(regex, ["abcd", "mabc0", "abc0m"]);
+    }
+
+    #[test]
+    fn test_is_match_neg_range() {
+        let regex = Regex::compile("[^a-z]\\d\\D").unwrap();
+
+        assert_all_matches!(regex, ["99d", "@1@"]);
+        assert_none_matches!(regex, ["ab1", "bd2", "z91"])
+    }
+
+    #[test]
+    fn test_is_match_any() {
+        let regex = Regex::compile("...").unwrap();
+
+        assert_all_matches!(regex, ["012", "abc", "#@!"]);
+        assert_none_matches!(regex, ["0\n2", "a\rc"]);
+    }
+
+    #[test]
+    fn test_is_match_negated_class() {
+        let regex = Regex::compile(r"[^a]").unwrap();
+
+        assert_all_matches!(regex, ["b", "z", "0"]);
+        assert_none_matches!(regex, ["a", "aaa"]);
+    }
+
+    #[test]
+    fn test_is_match_negated_escape_class() {
+        let regex = Regex::compile(r"^\D$").unwrap();
+
+        assert_all_matches!(regex, ["x", "_"]);
+        assert_none_matches!(regex, ["7", "0"]);
+    }
+
+    #[test]
+    fn test_is_match_dot() {
+        let regex = Regex::compile(r"^.?$").unwrap();
+
+        assert_all_matches!(regex, ["", "a"]);
+        assert_none_matches!(regex, ["\n", "\r"]);
     }
 }
