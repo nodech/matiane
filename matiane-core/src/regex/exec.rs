@@ -25,11 +25,6 @@ impl<'a> ExecRegex<'a> {
                 let state = &self.nfa.states[state_id];
 
                 match state {
-                    NfaState::Match { symbol, next } => {
-                        if ch == *symbol {
-                            next_states.push(*next);
-                        }
-                    }
                     NfaState::MatchClass { class, next } => {
                         if class.matches(ch) {
                             next_states.push(*next);
@@ -56,7 +51,6 @@ impl<'a> ExecRegex<'a> {
             let state = &self.nfa.states[state_id];
 
             match state {
-                NfaState::Match { .. } => continue,
                 NfaState::MatchClass { .. } => continue,
                 NfaState::Split { out1, out2 } => {
                     states.push(*out1);

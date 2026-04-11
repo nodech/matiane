@@ -27,10 +27,6 @@ enum FragmentState {
         out1: Option<StateId>,
         out2: Option<StateId>,
     },
-    Match {
-        symbol: char,
-        next: Option<StateId>,
-    },
     MatchClass {
         class: CharClass,
         next: Option<StateId>,
@@ -41,7 +37,6 @@ enum FragmentState {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum NfaState {
     Split { out1: StateId, out2: StateId },
-    Match { symbol: char, next: StateId },
     MatchClass { class: CharClass, next: StateId },
     Finish,
 }
@@ -124,9 +119,6 @@ impl NfaBuilder {
             let state = &mut self.states[out.0];
 
             match state {
-                FragmentState::Match { next, .. } => {
-                    *next = Some(s);
-                }
                 FragmentState::MatchClass { next, .. } => {
                     *next = Some(s);
                 }
@@ -140,20 +132,6 @@ impl NfaBuilder {
                 _ => {}
             }
         }
-    }
-
-    fn match_char(&mut self, ch: char) -> ParseResult<()> {
-        let s = self.state(FragmentState::Match {
-            symbol: ch,
-            next: None,
-        });
-
-        self.push(Fragment {
-            start: s,
-            outs: vec![s],
-        });
-
-        Ok(())
     }
 
     fn match_class(&mut self, class: CharClass) -> ParseResult<()> {
@@ -266,10 +244,6 @@ impl NfaBuilder {
             .into_iter()
             .map(|fs| {
                 Ok(match fs {
-                    FragmentState::Match { symbol, next } => NfaState::Match {
-                        symbol,
-                        next: next.ok_or(ParseError::MalformedRegex)?,
-                    },
                     FragmentState::MatchClass { class, next } => {
                         NfaState::MatchClass {
                             class,
@@ -296,7 +270,6 @@ impl NfaBuilder {
     fn build_frags(&mut self, tokens: PostfixTokens) -> ParseResult<()> {
         for el in tokens.into_iter() {
             match el {
-                Token::Char(ch) => self.match_char(ch)?,
                 Token::Concat => self.concat()?,
                 Token::Pipe => self.pipe()?,
                 Token::Star => self.star()?,
@@ -345,8 +318,8 @@ mod tests {
         let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = vec![
-            NfaState::Match {
-                symbol: 'a',
+            NfaState::MatchClass {
+                class: CharClass::char('a'),
                 next: StateId(1),
             },
             NfaState::Finish,
@@ -363,16 +336,16 @@ mod tests {
         let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = vec![
-            NfaState::Match {
-                symbol: 'a',
+            NfaState::MatchClass {
+                class: CharClass::char('a'),
                 next: StateId(1),
             },
-            NfaState::Match {
-                symbol: 'b',
+            NfaState::MatchClass {
+                class: CharClass::char('b'),
                 next: StateId(2),
             },
-            NfaState::Match {
-                symbol: 'c',
+            NfaState::MatchClass {
+                class: CharClass::char('c'),
                 next: StateId(3),
             },
             NfaState::Finish,
@@ -389,20 +362,20 @@ mod tests {
         let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = vec![
-            NfaState::Match {
-                symbol: 'a',
+            NfaState::MatchClass {
+                class: CharClass::char('a'),
                 next: StateId(1),
             },
-            NfaState::Match {
-                symbol: 'b',
+            NfaState::MatchClass {
+                class: CharClass::char('b'),
                 next: StateId(2),
             },
-            NfaState::Match {
-                symbol: 'c',
+            NfaState::MatchClass {
+                class: CharClass::char('c'),
                 next: StateId(3),
             },
-            NfaState::Match {
-                symbol: 'd',
+            NfaState::MatchClass {
+                class: CharClass::char('d'),
                 next: StateId(4),
             },
             NfaState::Finish,
@@ -418,16 +391,16 @@ mod tests {
         let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = vec![
-            NfaState::Match {
-                symbol: 'a',
+            NfaState::MatchClass {
+                class: CharClass::char('a'),
                 next: StateId(1),
             },
-            NfaState::Match {
-                symbol: 'b',
+            NfaState::MatchClass {
+                class: CharClass::char('b'),
                 next: StateId(4),
             },
-            NfaState::Match {
-                symbol: 'd',
+            NfaState::MatchClass {
+                class: CharClass::char('d'),
                 next: StateId(4),
             },
             NfaState::Split {
@@ -448,24 +421,24 @@ mod tests {
         let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = vec![
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 0
-                symbol: 'a',
+                class: CharClass::char('a'),
                 next: StateId(1),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 1
-                symbol: 'b',
+                class: CharClass::char('b'),
                 next: StateId(5),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 2
-                symbol: 'c',
+                class: CharClass::char('c'),
                 next: StateId(3),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 3
-                symbol: 'd',
+                class: CharClass::char('d'),
                 next: StateId(5),
             },
             NfaState::Split {
@@ -486,14 +459,14 @@ mod tests {
         let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = vec![
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 0
-                symbol: 'a',
+                class: CharClass::char('a'),
                 next: StateId(3),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 1
-                symbol: 'c',
+                class: CharClass::char('c'),
                 next: StateId(3),
             },
             NfaState::Split {
@@ -501,19 +474,19 @@ mod tests {
                 out1: StateId(0),
                 out2: StateId(1),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 3
-                symbol: 'd',
+                class: CharClass::char('d'),
                 next: StateId(7),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 4
-                symbol: 'i',
+                class: CharClass::char('i'),
                 next: StateId(5),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 5
-                symbol: 'o',
+                class: CharClass::char('o'),
                 next: StateId(7),
             },
             NfaState::Split {
@@ -535,24 +508,24 @@ mod tests {
         let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = vec![
-            NfaState::Match {
-                symbol: 'a',
+            NfaState::MatchClass {
+                class: CharClass::char('a'),
                 next: StateId(5),
             },
-            NfaState::Match {
-                symbol: 'b',
+            NfaState::MatchClass {
+                class: CharClass::char('b'),
                 next: StateId(5),
             },
             NfaState::Split {
                 out1: StateId(0),
                 out2: StateId(1),
             },
-            NfaState::Match {
-                symbol: 'c',
+            NfaState::MatchClass {
+                class: CharClass::char('c'),
                 next: StateId(6),
             },
-            NfaState::Match {
-                symbol: 'd',
+            NfaState::MatchClass {
+                class: CharClass::char('d'),
                 next: StateId(6),
             },
             NfaState::Split {
@@ -573,9 +546,9 @@ mod tests {
         let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = [
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 0
-                symbol: 'a',
+                class: CharClass::char('a'),
                 next: StateId(1),
             },
             NfaState::Split {
@@ -583,9 +556,9 @@ mod tests {
                 out1: StateId(0),
                 out2: StateId(5),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 2
-                symbol: 'b',
+                class: CharClass::char('b'),
                 next: StateId(3),
             },
             NfaState::Split {
@@ -612,14 +585,14 @@ mod tests {
         let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = [
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 0
-                symbol: 'a',
+                class: CharClass::char('a'),
                 next: StateId(3),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 1
-                symbol: 'b',
+                class: CharClass::char('b'),
                 next: StateId(3),
             },
             NfaState::Split {
@@ -632,9 +605,9 @@ mod tests {
                 out1: StateId(2),
                 out2: StateId(7),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 4
-                symbol: 'b',
+                class: CharClass::char('b'),
                 next: StateId(5),
             },
             NfaState::Split {
@@ -660,9 +633,9 @@ mod tests {
         let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = [
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 0
-                symbol: 'a',
+                class: CharClass::char('a'),
                 next: StateId(1),
             },
             NfaState::Split {
@@ -670,9 +643,9 @@ mod tests {
                 out1: StateId(0),
                 out2: StateId(5),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 2
-                symbol: 'b',
+                class: CharClass::char('b'),
                 next: StateId(3),
             },
             NfaState::Split {
@@ -699,14 +672,14 @@ mod tests {
         let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = [
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 0
-                symbol: 'b',
+                class: CharClass::char('b'),
                 next: StateId(2),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 1
-                symbol: 'a',
+                class: CharClass::char('a'),
                 next: StateId(2),
             },
             NfaState::Split {
@@ -728,14 +701,14 @@ mod tests {
         let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = [
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 0
-                symbol: 'b',
+                class: CharClass::char('b'),
                 next: StateId(1),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 1
-                symbol: 'a',
+                class: CharClass::char('a'),
                 next: StateId(2),
             },
             NfaState::Split {
@@ -757,14 +730,14 @@ mod tests {
         let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = [
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 0
-                symbol: 'b',
+                class: CharClass::char('b'),
                 next: StateId(2),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 1
-                symbol: 'a',
+                class: CharClass::char('a'),
                 next: StateId(3),
             },
             NfaState::Split {
@@ -786,19 +759,19 @@ mod tests {
         let nfa = NfaBuilder::build(postfix).unwrap();
 
         let expected = [
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 0
-                symbol: 'a',
+                class: CharClass::char('a'),
                 next: StateId(1),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 1
-                symbol: 'b',
+                class: CharClass::char('b'),
                 next: StateId(3),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 2
-                symbol: 'c',
+                class: CharClass::char('c'),
                 next: StateId(4),
             },
             NfaState::Split {
@@ -806,9 +779,9 @@ mod tests {
                 out1: StateId(2),
                 out2: StateId(4),
             },
-            NfaState::Match {
+            NfaState::MatchClass {
                 // 4
-                symbol: 'd',
+                class: CharClass::char('d'),
                 next: StateId(5),
             },
             NfaState::Finish, // 5

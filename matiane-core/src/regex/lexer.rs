@@ -247,12 +247,18 @@ impl CharClass {
     fn dot() -> Self {
         Self::line_terminators().negated()
     }
+
+    pub(super) fn char(ch: char) -> Self {
+        CharClass {
+            ranges: vec![CharRange { start: ch, end: ch }],
+            negated: false,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
-    Concat, // Pseudo element?
-    Char(char),
+    Concat,   // Pseudo element?
     Question, // ?
     Star,     // *
     Plus,     // +
@@ -361,7 +367,7 @@ pub(super) fn tokenize(
                     'D' => Token::Class(CharClass::digits().negated()),
                     's' => Token::Class(CharClass::space()),
                     'S' => Token::Class(CharClass::space().negated()),
-                    _ => Token::Char(escaped),
+                    _ => Token::Class(CharClass::char(escaped)),
                 }
             }
             '\n' | '\r' => {
@@ -380,7 +386,7 @@ pub(super) fn tokenize(
 
                 Token::Class(chclass)
             }
-            _ => Token::Char(ch),
+            _ => Token::Class(CharClass::char(ch)),
         };
 
         insert_maybe_concat(&mut result, token);
@@ -403,8 +409,7 @@ fn insert_maybe_concat(tokens: &mut TokenStream, token: Token) {
 fn insert_concat_after(token: &Token) -> bool {
     matches!(
         token,
-        Token::Char(_)
-            | Token::RParen
+        Token::RParen
             | Token::Star
             | Token::Plus
             | Token::Question
@@ -413,7 +418,7 @@ fn insert_concat_after(token: &Token) -> bool {
 }
 
 fn insert_concat_before(token: &Token) -> bool {
-    matches!(token, Token::Char(_) | Token::LParen | Token::Class(_))
+    matches!(token, Token::LParen | Token::Class(_))
 }
 
 fn precedence(token: &Token) -> usize {
@@ -529,13 +534,13 @@ mod tests {
             assert_eq!(
                 tokenize("abcd".chars()).unwrap(),
                 vec![
-                    Char('a'),
+                    Class(CharClass::char('a')),
                     Concat,
-                    Char('b'),
+                    Class(CharClass::char('b')),
                     Concat,
-                    Char('c'),
+                    Class(CharClass::char('c')),
                     Concat,
-                    Char('d')
+                    Class(CharClass::char('d'))
                 ]
             );
         }
@@ -544,7 +549,11 @@ mod tests {
         fn test_escape() {
             assert_eq!(
                 tokenize("\\\\\\(".chars()).unwrap(),
-                vec![Char('\\'), Concat, Char('('),]
+                vec![
+                    Class(CharClass::char('\\')),
+                    Concat,
+                    Class(CharClass::char('(')),
+                ]
             );
 
             assert_eq!(
@@ -559,19 +568,22 @@ mod tests {
                 tokenize("^ab*|d".chars()).unwrap(),
                 vec![
                     Caret,
-                    Char('a'),
+                    Class(CharClass::char('a')),
                     Concat,
-                    Char('b'),
+                    Class(CharClass::char('b')),
                     Star,
                     Pipe,
-                    Char('d')
+                    Class(CharClass::char('d'))
                 ]
             );
         }
 
         #[test]
         fn test_question_token() {
-            assert_eq!(tokenize("a?".chars()), Ok(vec![Char('a'), Question]));
+            assert_eq!(
+                tokenize("a?".chars()),
+                Ok(vec![Class(CharClass::char('a')), Question])
+            );
         }
     }
 
@@ -586,7 +598,14 @@ mod tests {
             let postfix = to_postfix(tokens).unwrap();
             assert_eq!(
                 postfix.tokens,
-                vec![Char('a'), Char('b'), Star, Concat, Char('d'), Pipe,]
+                vec![
+                    Class(CharClass::char('a')),
+                    Class(CharClass::char('b')),
+                    Star,
+                    Concat,
+                    Class(CharClass::char('d')),
+                    Pipe,
+                ]
             );
 
             // a (+) b * | d * (+) x +
@@ -597,13 +616,13 @@ mod tests {
             assert_eq!(
                 postfix.tokens,
                 vec![
-                    Char('a'),
-                    Char('b'),
+                    Class(CharClass::char('a')),
+                    Class(CharClass::char('b')),
                     Star,
                     Concat,
-                    Char('d'),
+                    Class(CharClass::char('d')),
                     Star,
-                    Char('x'),
+                    Class(CharClass::char('x')),
                     Plus,
                     Concat,
                     Pipe
@@ -620,7 +639,14 @@ mod tests {
 
             assert_eq!(
                 postfix.tokens,
-                vec![Char('a'), Char('b'), Star, Char('c'), Pipe, Concat,]
+                vec![
+                    Class(CharClass::char('a')),
+                    Class(CharClass::char('b')),
+                    Star,
+                    Class(CharClass::char('c')),
+                    Pipe,
+                    Concat,
+                ]
             );
         }
 
@@ -640,13 +666,13 @@ mod tests {
             assert_eq!(
                 postfix.tokens,
                 vec![
-                    Char('a'),
-                    Char('b'),
+                    Class(CharClass::char('a')),
+                    Class(CharClass::char('b')),
                     Concat,
-                    Char('c'),
+                    Class(CharClass::char('c')),
                     Question,
                     Concat,
-                    Char('d'),
+                    Class(CharClass::char('d')),
                     Concat,
                 ]
             )
@@ -660,7 +686,7 @@ mod tests {
             assert_eq!(
                 postfix.tokens,
                 vec![
-                    Char('a'),
+                    Class(CharClass::char('a')),
                     Class(CharClass {
                         ranges: vec![CharRange {
                             start: 'b',
@@ -670,7 +696,7 @@ mod tests {
                     }),
                     Question,
                     Concat,
-                    Char('z'),
+                    Class(CharClass::char('z')),
                     Concat,
                 ]
             );
@@ -684,11 +710,11 @@ mod tests {
             assert_eq!(
                 postfix.tokens,
                 vec![
-                    Char('a'),
+                    Class(CharClass::char('a')),
                     Class(CharClass::dot()),
                     Question,
                     Concat,
-                    Char('z'),
+                    Class(CharClass::char('z')),
                     Concat,
                 ]
             );
