@@ -12,7 +12,18 @@ impl<'a> ExecRegex<'a> {
         ExecRegex { nfa }
     }
 
-    fn add_state(&self, state_id: StateId, list: &mut Vec<StateId>) -> bool {
+    fn add_state(
+        &self,
+        state_id: StateId,
+        list: &mut Vec<StateId>,
+        seen: &mut [bool],
+    ) -> bool {
+        if seen[state_id.0] {
+            return false;
+        }
+
+        seen[state_id.0] = true;
+
         let state = &self.nfa.states[state_id];
 
         match state {
@@ -21,8 +32,8 @@ impl<'a> ExecRegex<'a> {
                 false
             }
             NfaState::Split { out1, out2 } => {
-                let left = self.add_state(*out1, list);
-                let right = self.add_state(*out2, list);
+                let left = self.add_state(*out1, list, seen);
+                let right = self.add_state(*out2, list, seen);
 
                 left || right
             }
@@ -33,8 +44,10 @@ impl<'a> ExecRegex<'a> {
     pub(super) fn is_match(&self, hay: &str) -> bool {
         let mut states = Vec::with_capacity(self.nfa.states.len());
         let mut next_states = Vec::with_capacity(self.nfa.states.len());
+        let mut seen = vec![false; self.nfa.states.len()];
 
-        let mut matched: bool = self.add_state(self.nfa.entry, &mut states);
+        let mut matched: bool =
+            self.add_state(self.nfa.entry, &mut states, &mut seen);
 
         if matched && !self.nfa.match_end {
             return true;
@@ -42,10 +55,13 @@ impl<'a> ExecRegex<'a> {
 
         for ch in hay.chars() {
             next_states.clear();
+            seen.fill(false);
+
             matched = false;
 
             if !self.nfa.match_start {
-                matched |= self.add_state(self.nfa.entry, &mut next_states);
+                matched |=
+                    self.add_state(self.nfa.entry, &mut next_states, &mut seen);
             }
 
             for state_id in &states {
@@ -54,7 +70,11 @@ impl<'a> ExecRegex<'a> {
                 match state {
                     NfaState::MatchClass { class, next } => {
                         if class.matches(ch) {
-                            matched |= self.add_state(*next, &mut next_states);
+                            matched |= self.add_state(
+                                *next,
+                                &mut next_states,
+                                &mut seen,
+                            );
                         }
                     }
                     &NfaState::Split { .. } | &NfaState::Finish => {
@@ -268,5 +288,13 @@ mod tests {
 
         assert_all_matches!(regex, ["", "a"]);
         assert_none_matches!(regex, ["\n", "\r"]);
+    }
+
+    #[test]
+    fn test_not_seen_blowup() {
+        let regex = Regex::compile("(a?)*z").unwrap();
+
+        assert_all_matches!(regex, ["aaaaaaaaaaaaaaaz", "az", "z"]);
+        assert_none_matches!(regex, ["aaaaaaaaaaaaaaaaaaaaay"]);
     }
 }

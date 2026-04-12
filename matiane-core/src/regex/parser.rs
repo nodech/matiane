@@ -19,7 +19,7 @@ pub enum ParseError {
 pub type ParseResult<T> = Result<T, ParseError>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct StateId(usize);
+pub(super) struct StateId(pub(super) usize);
 
 #[derive(Debug, Clone, PartialEq)]
 enum FragmentState {
