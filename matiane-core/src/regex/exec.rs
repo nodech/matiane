@@ -1,3 +1,5 @@
+use crate::regex::parser::StateId;
+
 use super::parser::Nfa;
 use super::parser::NfaState;
 
@@ -10,57 +12,65 @@ impl<'a> ExecRegex<'a> {
         ExecRegex { nfa }
     }
 
-    pub(super) fn is_match(&self, hay: &str) -> bool {
-        let mut states = vec![];
-        let mut next_states = vec![];
+    fn add_state(&self, state_id: StateId, list: &mut Vec<StateId>) -> bool {
+        let state = &self.nfa.states[state_id];
 
-        states.push(self.nfa.entry);
+        match state {
+            NfaState::MatchClass { .. } => {
+                list.push(state_id);
+                false
+            }
+            NfaState::Split { out1, out2 } => {
+                let left = self.add_state(*out1, list);
+                let right = self.add_state(*out2, list);
+
+                left || right
+            }
+            NfaState::Finish => true,
+        }
+    }
+
+    pub(super) fn is_match(&self, hay: &str) -> bool {
+        let mut states = Vec::with_capacity(self.nfa.states.len());
+        let mut next_states = Vec::with_capacity(self.nfa.states.len());
+
+        let mut matched: bool = self.add_state(self.nfa.entry, &mut states);
+
+        if matched && !self.nfa.match_end {
+            return true;
+        }
 
         for ch in hay.chars() {
+            next_states.clear();
+            matched = false;
+
             if !self.nfa.match_start {
-                next_states.push(self.nfa.entry);
+                matched |= self.add_state(self.nfa.entry, &mut next_states);
             }
 
-            while let Some(state_id) = states.pop() {
-                let state = &self.nfa.states[state_id];
+            for state_id in &states {
+                let state = &self.nfa.states[*state_id];
 
                 match state {
                     NfaState::MatchClass { class, next } => {
                         if class.matches(ch) {
-                            next_states.push(*next);
+                            matched |= self.add_state(*next, &mut next_states);
                         }
                     }
-                    NfaState::Split { out1, out2 } => {
-                        states.push(*out1);
-                        states.push(*out2);
-                    }
-                    NfaState::Finish => {
-                        if !self.nfa.match_end {
-                            return true;
-                        }
+                    &NfaState::Split { .. } | &NfaState::Finish => {
+                        unreachable!("Unreachable")
                     }
                 }
             }
 
-            states.clear();
+            if matched && !self.nfa.match_end {
+                return true;
+            }
+
             std::mem::swap(&mut states, &mut next_states);
         }
 
-        // final check
-        while let Some(state_id) = states.pop() {
-            let state = &self.nfa.states[state_id];
-
-            match state {
-                NfaState::MatchClass { .. } => continue,
-                NfaState::Split { out1, out2 } => {
-                    states.push(*out1);
-                    states.push(*out2);
-                }
-                NfaState::Finish => return true,
-            }
-        }
-
-        false
+        matched
     }
 }
 
@@ -171,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn test_is_match_last() {
+    fn test_is_match_last_simple() {
         let regex = Regex::compile("aaa$").unwrap();
 
         assert_all_matches!(regex, ["aaa", "mmmmaaa", "aaaaaaaa",]);

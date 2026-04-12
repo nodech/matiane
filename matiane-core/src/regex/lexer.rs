@@ -14,7 +14,6 @@ pub enum LexError {
     UnsupportedToken { token: Token, pos: usize },
     #[error("Unbalance parens")]
     UnbalancedParens,
-
     #[error("Range out of order in character class at {0}.")]
     IncorrectCharClassRangeOrder(usize),
 }
