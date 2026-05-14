@@ -306,7 +306,7 @@ impl NfaBuilder {
 
 #[cfg(test)]
 mod tests {
-    use crate::regex::lexer::CharRange;
+    use crate::lexer::CharRange;
 
     use super::super::lexer::{to_postfix, tokenize};
     use super::*;

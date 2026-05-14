@@ -5,7 +5,6 @@ pub mod config;
 pub mod events;
 pub mod log;
 pub mod process;
-pub mod regex;
 pub mod store;
 pub mod util;
 pub mod xdg;
