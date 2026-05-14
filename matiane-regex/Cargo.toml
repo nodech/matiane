@@ -2,6 +2,10 @@
 name = "matiane-regex"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "Simple regex engine"
+homepage = "https://github.com/nodech/matiane"
+repository = "https://github.com/nodech/matiane"
 
 [dependencies]
 thiserror.workspace = true

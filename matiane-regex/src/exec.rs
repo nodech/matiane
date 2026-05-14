@@ -1,4 +1,4 @@
-use crate::regex::parser::StateId;
+use crate::parser::StateId;
 
 use super::parser::Nfa;
 use super::parser::NfaState;
