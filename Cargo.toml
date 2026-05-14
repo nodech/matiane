@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["sway-matiane", "matiane-core", "matiane"]
+members = ["sway-matiane", "matiane-core", "matiane", "matiane-regex"]
 
 [workspace.dependencies]
 anyhow = "1.0.98"

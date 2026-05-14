@@ -2328,6 +2328,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "clap",
  "futures",
  "libc",
  "log",
@@ -2339,6 +2340,13 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml 0.9.7",
+]
+
+[[package]]
+name = "matiane-regex"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.16",
 ]
 
 [[package]]
